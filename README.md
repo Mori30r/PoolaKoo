@@ -1,4 +1,4 @@
-# Ledger — Wealth & Crypto Dashboard
+# PoolaKoo — Wealth & Crypto Dashboard
 
 Local-first personal wealth tracker. All data lives in your browser's
 localStorage. Dark theme only. Every manual amount field (deposits,
