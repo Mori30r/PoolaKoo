@@ -1,0 +1,1282 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  LayoutDashboard, Wallet, Landmark, Layers, Briefcase, Snowflake, Flame,
+  TrendingUp, Shield, Banknote, PiggyBank, History, Settings as SettingsIcon,
+  Plus, Minus, RefreshCw, Download, X, Globe, ArrowUpRight, ArrowDownRight,
+  Trash2, Edit3, ArrowLeftRight, Sparkles, ShoppingCart, UtensilsCrossed, Wifi,
+  Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon
+} from "lucide-react";
+import {
+  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
+  PieChart, Pie, Cell, AreaChart, Area
+} from "recharts";
+
+/* ============================================================================
+   WEALTH & CRYPTO DASHBOARD
+   Local-first personal finance tracker. All data persists in the browser
+   (localStorage). Every manual amount field accepts USD or Toman.
+   ============================================================================ */
+
+/* --------------------------- Design tokens ------------------------------- */
+const PALETTE = {
+  bg: "#0A0F14", bgSoft: "#0F161D", panel: "#141C24", panelBorder: "#22303A",
+  ink: "#E7EEF2", inkDim: "#8DA0AC", teal: "#33D6B0", amber: "#E8B15C",
+  coral: "#E8735C", violet: "#8B7FE8",
+};
+
+// Selectable basket categories (account types).
+const CATEGORY_META = {
+  bank:        { label: { en: "Bank Accounts",        fa: "حساب‌های بانکی" }, icon: Landmark,   color: "#5B9DE8" },
+  project:     { label: { en: "Project Expenses",      fa: "هزینه‌های پروژه" }, icon: Briefcase,  color: PALETTE.violet },
+  coldWallet:  { label: { en: "Cold Wallets",           fa: "کیف پول سرد" }, icon: Snowflake,  color: "#6FD0E8" },
+  hotWallet:   { label: { en: "Hot Wallets",            fa: "کیف پول گرم" }, icon: Flame,      color: PALETTE.coral },
+  investment:  { label: { en: "Long-term Investments",  fa: "سرمایه‌گذاری بلندمدت" }, icon: TrendingUp, color: PALETTE.amber },
+  insurance:   { label: { en: "Insurance Funds",        fa: "صندوق بیمه" }, icon: Shield,     color: "#8DA0AC" },
+  cash:        { label: { en: "Purchasing Power",       fa: "قدرت خرید نقدی" }, icon: Banknote,   color: "#E8D75C" },
+  savings:     { label: { en: "Savings",                fa: "پس‌انداز" }, icon: PiggyBank,  color: "#5CE8A0" },
+};
+const DEFI_META = { label: { en: "DeFi Positions", fa: "پوزیشن‌های دیفای" }, icon: Layers, color: PALETTE.teal };
+const LOAN_META = { label: { en: "Loans", fa: "وام‌ها" }, icon: HandCoins, color: "#E8D75C" };
+const GOAL_META = { label: { en: "Goals", fa: "اهداف" }, icon: Target, color: PALETTE.violet };
+function categoryMeta(cat) {
+  if (cat === "defi") return DEFI_META;
+  if (cat === "loan") return LOAN_META;
+  if (cat === "goal") return GOAL_META;
+  return CATEGORY_META[cat];
+}
+
+// Spending/income categories for the ledger — separate from account type.
+const TX_CATEGORIES = {
+  groceries:  { label: { en: "Groceries", fa: "خواربار" }, icon: ShoppingCart, color: "#5CE8A0" },
+  restaurant: { label: { en: "Restaurant", fa: "رستوران" }, icon: UtensilsCrossed, color: "#E8B15C" },
+  utilities:  { label: { en: "Internet & Charge", fa: "اینترنت و شارژ" }, icon: Wifi, color: "#5B9DE8" },
+  clothes:    { label: { en: "Clothes", fa: "پوشاک" }, icon: Shirt, color: "#8B7FE8" },
+  fun:        { label: { en: "Fun", fa: "تفریح" }, icon: PartyPopper, color: "#E86FA0" },
+  bills:      { label: { en: "Bills", fa: "قبوض" }, icon: Receipt, color: "#E8735C" },
+  loan:       { label: { en: "Loan", fa: "وام" }, icon: HandCoins, color: "#E8D75C" },
+  others:     { label: { en: "Others", fa: "سایر" }, icon: MoreHorizontal, color: "#8DA0AC" },
+};
+function txCatLabel(key, lang) { return TX_CATEGORIES[key]?.label[lang] || key; }
+
+const CHAIN_OPTIONS = [
+  { id: "ethereum", label: "Ethereum" }, { id: "binance_smart", label: "BNB Smart Chain" },
+  { id: "polygon", label: "Polygon" }, { id: "arbitrum", label: "Arbitrum" },
+  { id: "optimism", label: "Optimism" }, { id: "base", label: "Base" },
+  { id: "avalanche", label: "Avalanche" }, { id: "solana", label: "Solana" }, { id: "bitcoin", label: "Bitcoin" },
+];
+
+/* --------------------------- Live USDT→IRT rate ---------------------------- */
+async function fetchUsdtRateLive() {
+  const res = await fetch("/api/usdt");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.irt == null) throw new Error(body?.error || "Could not fetch USDT rate");
+  return body.irt;
+}
+
+/* --------------------------------- i18n ----------------------------------- */
+const STR = {
+  appName: { en: "Ledger.", fa: "لجر." },
+  tagline: { en: "your wealth, in one quiet room", fa: "ثروت شما، در یک اتاق آرام" },
+  nav: {
+    dashboard: { en: "Dashboard", fa: "داشبورد" }, portfolio: { en: "Portfolio", fa: "پرتفوی" },
+    wallets: { en: "Wallets", fa: "کیف‌پول‌ها" }, defi: { en: "DeFi", fa: "دیفای" },
+    loans: { en: "Loans", fa: "وام‌ها" }, goals: { en: "Goals", fa: "اهداف" },
+    activity: { en: "Activity", fa: "فعالیت‌ها" },
+    settings: { en: "Settings", fa: "تنظیمات" },
+  },
+  totalNetWorth: { en: "Total Net Worth", fa: "ارزش خالص کل" },
+  addBasket: { en: "New Basket", fa: "بسکت جدید" },
+  addTx: { en: "Add / Subtract", fa: "افزودن / کسر" },
+  export: { en: "Export CSV", fa: "خروجی CSV" },
+  breakdown: { en: "Portfolio Breakdown", fa: "تفکیک پرتفوی" },
+  defiProjection: { en: "DeFi Yield Projection", fa: "پیش‌بینی سود دیفای" },
+  monthly: { en: "Monthly", fa: "ماهانه" }, yearly: { en: "Yearly", fa: "سالانه" }, weekly: { en: "Weekly", fa: "هفتگی" },
+  noData: { en: "Nothing here yet.", fa: "هنوز چیزی ثبت نشده." },
+  balance: { en: "Balance", fa: "موجودی" }, apy: { en: "Interest Rate (APY %)", fa: "نرخ سود سالانه (%)" },
+  category: { en: "Category", fa: "دسته" }, name: { en: "Name", fa: "نام" }, amount: { en: "Amount", fa: "مبلغ" },
+  save: { en: "Save", fa: "ذخیره" }, cancel: { en: "Cancel", fa: "انصراف" }, delete: { en: "Delete", fa: "حذف" }, edit: { en: "Edit", fa: "ویرایش" },
+  deposit: { en: "Deposit", fa: "واریز" }, withdraw: { en: "Withdraw", fa: "برداشت" },
+  interest: { en: "Interest", fa: "سود" }, transfer: { en: "Transfer", fa: "انتقال" },
+  note: { en: "Note (optional)", fa: "یادداشت (اختیاری)" }, walletAddress: { en: "Wallet Address", fa: "آدرس کیف‌پول" },
+  allCategories: { en: "All categories", fa: "همه دسته‌ها" },
+  usdtRate: { en: "USDT → IRT rate", fa: "نرخ تتر به تومان" }, fetchRate: { en: "Fetch live rate", fa: "دریافت نرخ زنده" },
+  language: { en: "Language", fa: "زبان" }, currency: { en: "Currency", fa: "واحد پول" },
+  emptyBaskets: { en: "No baskets yet — create your first one.", fa: "هنوز بسکتی نساخته‌اید." },
+  recurring: { en: "Recurring Monthly Income", fa: "درآمد ماهانه ثابت" }, addRecurring: { en: "Add Recurring", fa: "افزودن مورد ثابت" },
+  logThisMonth: { en: "Log this month", fa: "ثبت این ماه" }, selectBasket: { en: "Target", fa: "مقصد" },
+  relativeToTotal: { en: "of net worth", fa: "از ارزش کل" },
+  connectAddressHint: {
+    en: "Paste an EVM/BTC/Solana address to label a wallet. Balances are entered manually — use the Deposit/Withdraw buttons to keep them current.",
+    fa: "آدرس EVM/بیت‌کوین/سولانا را برای برچسب‌گذاری کیف‌پول وارد کنید. موجودی به‌صورت دستی وارد می‌شود."
+  },
+  chain: { en: "Blockchain", fa: "شبکه" }, fetchError: { en: "Fetch failed", fa: "دریافت ناموفق بود" },
+  addDefi: { en: "New DeFi Position", fa: "پوزیشن دیفای جدید" }, connectedWallet: { en: "Connected Wallet", fa: "کیف‌پول متصل" },
+  emptyDefi: { en: "No DeFi positions yet — connect one to a wallet.", fa: "هنوز پوزیشن دیفای نساخته‌اید." },
+  needsWalletFirst: { en: "Add a hot or cold wallet before creating a DeFi position.", fa: "قبل از ساخت پوزیشن دیفای، یک کیف‌پول اضافه کنید." },
+  spendingCategory: { en: "Spending Category (optional)", fa: "دسته‌بندی هزینه (اختیاری)" },
+  addLoan: { en: "New Loan", fa: "وام جدید" }, principal: { en: "Principal", fa: "مبلغ اصلی وام" },
+  months: { en: "Months to Repay", fa: "تعداد ماه بازپرداخت" }, dueDay: { en: "Monthly Due Day (1–28)", fa: "روز سررسید ماهانه (۱ تا ۲۸)" },
+  monthlyPayment: { en: "Monthly Payment", fa: "قسط ماهانه" }, totalOwed: { en: "Total to Repay", fa: "مجموع بازپرداخت" },
+  paidSoFar: { en: "Paid So Far", fa: "پرداخت‌شده تاکنون" }, remaining: { en: "Remaining", fa: "باقیمانده" },
+  nextDue: { en: "Next Due", fa: "سررسید بعدی" }, daysLeft: { en: "days left", fa: "روز باقیمانده" },
+  overdue: { en: "Overdue", fa: "معوق" }, logPayment: { en: "Log Payment", fa: "ثبت قسط" },
+  payFrom: { en: "Pay from (optional)", fa: "پرداخت از (اختیاری)" }, noAccount: { en: "— just track, no account —", fa: "— فقط ثبت، بدون حساب —" },
+  emptyLoans: { en: "No loans yet.", fa: "هنوز وامی ثبت نشده." }, paidOff: { en: "Paid Off", fa: "تسویه‌شده" },
+  monthsPaid: { en: "months paid", fa: "ماه پرداخت‌شده" },
+  addGoal: { en: "New Goal", fa: "هدف جدید" }, targetAmount: { en: "Target Amount", fa: "مبلغ هدف" },
+  currentAmount: { en: "Saved So Far", fa: "پس‌انداز تاکنون" }, emptyGoals: { en: "No goals yet — set your first target.", fa: "هنوز هدفی ثبت نشده." },
+  contribute: { en: "Contribute", fa: "افزودن" }, listView: { en: "List", fa: "فهرست" }, breakdownView: { en: "Breakdown", fa: "تفکیک" },
+  income: { en: "Income", fa: "درآمد" }, expenses: { en: "Expenses", fa: "هزینه‌ها" },
+  target: { en: "Target", fa: "مقصد" }, editActivity: { en: "Edit Activity", fa: "ویرایش فعالیت" },
+};
+function t(key, lang) { const e = STR[key]; if (!e) return key; return e[lang] || e.en; }
+function catLabel(cat, lang) { return categoryMeta(cat)?.label[lang] || cat; }
+
+/* ------------------------------ Utilities --------------------------------- */
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const nowISO = () => new Date().toISOString();
+function fmtUSD(n) { const v = Number(n) || 0; return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 }); }
+function fmtIRT(n, rate) { const v = (Number(n) || 0) * (rate || 0); return Math.round(v).toLocaleString("en-US") + " تومان"; }
+function fmtMoney(n, currency, rate) { return currency === "USD" ? fmtUSD(n) : fmtIRT(n, rate); }
+function pct(n) { const v = Number(n) || 0; const sign = v > 0 ? "+" : ""; return sign + v.toFixed(2) + "%"; }
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+// Standard loan amortization formula.
+function loanMonthlyPayment(principal, apy, months) {
+  const r = (Number(apy) || 0) / 100 / 12;
+  const n = Math.max(Number(months) || 1, 1);
+  const P = Number(principal) || 0;
+  if (r === 0) return P / n;
+  return (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+}
+function loanNextDueDate(loan) {
+  const day = Math.min(Math.max(Number(loan.dueDay) || 1, 1), 28);
+  const now = new Date();
+  let due = new Date(now.getFullYear(), now.getMonth(), day, 23, 59, 59);
+  if (due < now) due = new Date(now.getFullYear(), now.getMonth() + 1, day, 23, 59, 59);
+  return due;
+}
+
+/* ------------------------------ Storage hook ------------------------------ */
+const STORE_KEY = "wealth-dashboard-v3";
+const DEFAULT_DATA = {
+  baskets: [], defiPositions: [], loans: [], goals: [], activities: [], recurring: [],
+  settings: { lang: "en", currency: "USD", usdtToIrt: 950000 },
+};
+function useWealthStore() {
+  const [data, setData] = useState(DEFAULT_DATA);
+  const [loaded, setLoaded] = useState(false);
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setData({ ...DEFAULT_DATA, ...parsed, settings: { ...DEFAULT_DATA.settings, ...(parsed.settings || {}) } });
+      }
+    } catch (e) { /* start fresh */ } finally { setLoaded(true); }
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try { window.localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch (e) { console.error("Storage save failed", e); }
+    }, 250);
+    return () => clearTimeout(saveTimer.current);
+  }, [data, loaded]);
+  return [data, setData, loaded];
+}
+
+/* ============================================================================
+   SMALL UI PRIMITIVES
+   ============================================================================ */
+function Card({ children, className = "", style }) {
+  return <div className={`rounded-2xl border ${className}`} style={{ background: PALETTE.panel, borderColor: PALETTE.panelBorder, ...style }}>{children}</div>;
+}
+function IconBadge({ Icon, color }) {
+  return <div className="flex items-center justify-center rounded-xl shrink-0" style={{ width: 40, height: 40, background: `${color}1F`, color }}><Icon size={19} strokeWidth={2} /></div>;
+}
+function Button({ children, onClick, variant = "solid", className = "", type = "button", disabled }) {
+  const base = "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium transition-all active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100";
+  const styles = {
+    solid: { background: PALETTE.teal, color: "#06120E" },
+    ghost: { background: "transparent", color: PALETTE.ink, border: `1px solid ${PALETTE.panelBorder}` },
+    danger: { background: "transparent", color: PALETTE.coral, border: `1px solid ${PALETTE.coral}33` },
+  };
+  return <button type={type} onClick={onClick} disabled={disabled} className={`${base} ${className}`} style={styles[variant]}>{children}</button>;
+}
+function Field({ label, children }) {
+  return <label className="flex flex-col gap-1.5 text-sm"><span style={{ color: PALETTE.inkDim }}>{label}</span>{children}</label>;
+}
+const inputStyle = { background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.ink, borderRadius: 10, padding: "9px 12px", fontSize: 14, outline: "none" };
+function TInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
+function TSelect(props) { return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
+
+function AmountField({ label, usdValue, onChange, rate, lang }) {
+  const [currency, setCurrency] = useState("USD");
+  const [raw, setRaw] = useState(usdValue ? String(usdValue) : "");
+  const switchCurrency = (next) => {
+    if (next === currency) return;
+    const numeric = Number(raw) || 0;
+    const newRaw = next === "IRT" ? Math.round(numeric * (rate || 1)) : (numeric / (rate || 1));
+    setRaw(newRaw ? String(newRaw) : ""); setCurrency(next);
+  };
+  const handleChange = (v) => {
+    setRaw(v);
+    const numeric = Number(v) || 0;
+    onChange(currency === "USD" ? numeric : numeric / (rate || 1));
+  };
+  return (
+    <Field label={label}>
+      <div className="flex gap-2">
+        <TInput type="number" value={raw} onChange={e => handleChange(e.target.value)} className="flex-1" />
+        <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: `1px solid ${PALETTE.panelBorder}` }}>
+          {["USD", "IRT"].map(c => (
+            <button key={c} type="button" onClick={() => switchCurrency(c)} className="px-2.5 text-xs font-medium"
+              style={{ background: currency === c ? PALETTE.teal : "transparent", color: currency === c ? "#06120E" : PALETTE.inkDim }}>{c}</button>
+          ))}
+        </div>
+      </div>
+    </Field>
+  );
+}
+
+// Icon-grid picker for the 8 spending categories.
+function CategoryPicker({ value, onChange, lang }) {
+  return (
+    <Field label={t("spendingCategory", lang)}>
+      <div className="grid grid-cols-4 gap-2">
+        {Object.entries(TX_CATEGORIES).map(([key, meta]) => {
+          const Icon = meta.icon;
+          const active = value === key;
+          return (
+            <button key={key} type="button" onClick={() => onChange(active ? null : key)}
+              className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"
+              style={{ background: active ? `${meta.color}22` : PALETTE.bgSoft, border: `1px solid ${active ? meta.color : PALETTE.panelBorder}`, color: active ? meta.color : PALETTE.inkDim }}>
+              <Icon size={16} />
+              {meta.label[lang]}
+            </button>
+          );
+        })}
+      </div>
+    </Field>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#000A" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-md rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: PALETTE.panel, border: `1px solid ${PALETTE.panelBorder}` }}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold" style={{ color: PALETTE.ink }}>{title}</h3>
+          <button onClick={onClose} style={{ color: PALETTE.inkDim }}><X size={18} /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+function StatChip({ value }) {
+  const v = Number(value) || 0; const positive = v >= 0;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5"
+      style={{ color: positive ? PALETTE.teal : PALETTE.coral, background: positive ? `${PALETTE.teal}17` : `${PALETTE.coral}17` }}>
+      {positive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{pct(v)}
+    </span>
+  );
+}
+function LinearProgress({ percent, color = PALETTE.teal }) {
+  return (
+    <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: PALETTE.bgSoft }}>
+      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(Math.max(percent, 0), 100)}%`, background: color }} />
+    </div>
+  );
+}
+function CircularProgress({ percent, size = 96, stroke = 10, color = PALETTE.teal }) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.min(Math.max(percent, 0), 100);
+  const dash = (c * clamped) / 100;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={PALETTE.panelBorder} strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
+          strokeDasharray={`${dash} ${c - dash}`} strokeLinecap="round" transform={`rotate(-90 ${size / 2} ${size / 2})`} style={{ transition: "stroke-dasharray 0.3s" }} />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold" style={{ color: PALETTE.ink }}>{Math.round(clamped)}%</div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   DERIVED DATA HELPERS
+   ============================================================================ */
+function basketsTotal(baskets) { return baskets.reduce((s, b) => s + (Number(b.balance) || 0), 0); }
+function defiTotal(defiPositions) { return defiPositions.reduce((s, p) => s + (Number(p.balance) || 0), 0); }
+function totalNetWorth(data) { return basketsTotal(data.baskets) + defiTotal(data.defiPositions); }
+
+function computeHistory(data) {
+  const events = [];
+  data.baskets.forEach(b => events.push({ date: b.createdAt, amount: Number(b.initialBalance) || 0 }));
+  data.defiPositions.forEach(p => events.push({ date: p.createdAt, amount: Number(p.initialBalance) || 0 }));
+  data.activities.forEach(a => { if (a.targetType === "basket" || a.targetType === "defi") events.push({ date: a.date, amount: Number(a.amount) || 0 }); });
+  events.sort((a, b) => new Date(a.date) - new Date(b.date));
+  let running = 0;
+  const series = events.map(e => { running += e.amount; return { date: e.date, value: running }; });
+  if (series.length === 0) series.push({ date: nowISO(), value: 0 });
+  return series;
+}
+function filterSeries(series, range) {
+  const now = Date.now();
+  const spans = { "7d": 7 * 864e5, "30d": 30 * 864e5, "365d": 365 * 864e5 };
+  const cutoff = now - spans[range];
+  const filtered = series.filter(p => new Date(p.date).getTime() >= cutoff);
+  return filtered.length > 1 ? filtered : series.slice(-2);
+}
+// Baskets + DeFi — used where a ledger entry must move real balances.
+function allTargets(data) {
+  return [
+    ...data.baskets.map(b => ({ id: b.id, name: b.name, type: "basket", category: b.category, balance: b.balance })),
+    ...data.defiPositions.map(p => ({ id: p.id, name: p.name, type: "defi", category: "defi", balance: p.balance })),
+  ];
+}
+// Everything an activity could reference, including loans/goals, for lookups & filters.
+function allTargetsExtended(data) {
+  return [
+    ...allTargets(data),
+    ...data.loans.map(l => ({ id: l.id, name: l.name, type: "loan", category: "loan" })),
+    ...data.goals.map(g => ({ id: g.id, name: g.name, type: "goal", category: "goal" })),
+  ];
+}
+
+/* ============================================================================
+   SIDEBAR + HEADER
+   ============================================================================ */
+const NAV_ITEMS = [
+  ["dashboard", LayoutDashboard], ["portfolio", Layers], ["wallets", Wallet], ["defi", Sparkles],
+  ["loans", HandCoins], ["goals", Target], ["activity", History], ["settings", SettingsIcon],
+];
+function Sidebar({ view, setView, lang }) {
+  return (
+    <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 px-4 py-6 border-r" style={{ borderColor: PALETTE.panelBorder }}>
+      <div className="flex items-center gap-2.5 px-2 mb-8">
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold" style={{ background: PALETTE.teal, color: "#06120E" }}>L</div>
+        <div>
+          <div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{t("appName", lang)}</div>
+          <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("tagline", lang)}</div>
+        </div>
+      </div>
+      <nav className="flex flex-col gap-1 overflow-y-auto">
+        {NAV_ITEMS.map(([key, Icon]) => {
+          const active = view === key;
+          return (
+            <button key={key} onClick={() => setView(key)} className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
+              style={{ background: active ? `${PALETTE.teal}14` : "transparent", color: active ? PALETTE.teal : PALETTE.inkDim }}>
+              <Icon size={17} />{STR.nav[key][lang]}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="mt-auto text-[11px] px-2" style={{ color: PALETTE.inkDim }}>
+        {lang === "en" ? "Everything stored on this device only." : "همه‌چیز فقط روی همین دستگاه ذخیره می‌شود."}
+      </div>
+    </aside>
+  );
+}
+function MobileNav({ view, setView, lang }) {
+  return (
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex justify-start gap-1 py-2 overflow-x-auto border-t px-2" style={{ background: PALETTE.panel, borderColor: PALETTE.panelBorder }}>
+      {NAV_ITEMS.map(([key, Icon]) => (
+        <button key={key} onClick={() => setView(key)} className="flex flex-col items-center gap-0.5 px-2.5 py-1 shrink-0" style={{ color: view === key ? PALETTE.teal : PALETTE.inkDim }}>
+          <Icon size={18} /><span className="text-[10px]">{STR.nav[key][lang]}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+function Header({ lang, setLang, currency, setCurrency, onExport, view }) {
+  return (
+    <header className="flex items-center justify-between px-5 md:px-8 py-5 sticky top-0 z-30 backdrop-blur" style={{ background: `${PALETTE.bg}E6`, borderBottom: `1px solid ${PALETTE.panelBorder}` }}>
+      <h1 className="text-lg font-semibold capitalize" style={{ color: PALETTE.ink }}>{STR.nav[view] ? STR.nav[view][lang] : view}</h1>
+      <div className="flex items-center gap-2">
+        <button onClick={onExport} title={t("export", lang)} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }}><Download size={16} /></button>
+        <button onClick={() => setCurrency(c => c === "USD" ? "IRT" : "USD")} className="p-2 rounded-lg text-xs font-semibold w-12" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.ink }}>{currency}</button>
+        <button onClick={() => setLang(l => l === "en" ? "fa" : "en")} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }} title={t("language", lang)}><Globe size={16} /></button>
+      </div>
+    </header>
+  );
+}
+
+/* ============================================================================
+   DASHBOARD VIEW
+   ============================================================================ */
+function DashboardView({ data, lang, currency, rate, openTxModal }) {
+  const [range, setRange] = useState("30d");
+  const net = totalNetWorth(data);
+  const history = useMemo(() => computeHistory(data), [data]);
+  const shown = useMemo(() => filterSeries(history, range), [history, range]);
+  const changePct = useMemo(() => {
+    if (shown.length < 2) return 0;
+    const first = shown[0].value || 1;
+    return ((shown[shown.length - 1].value - first) / Math.abs(first)) * 100;
+  }, [shown]);
+  const byCategory = useMemo(() => {
+    const map = {};
+    data.baskets.forEach(b => { map[b.category] = (map[b.category] || 0) + (Number(b.balance) || 0); });
+    const defiSum = defiTotal(data.defiPositions);
+    if (defiSum) map.defi = defiSum;
+    return Object.entries(map).filter(([, v]) => v !== 0).map(([cat, value]) => ({ cat, value, color: categoryMeta(cat)?.color || "#888" }));
+  }, [data.baskets, data.defiPositions]);
+  const defiMonthly = data.defiPositions.reduce((s, p) => s + (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12, 0);
+  const defiYearly = data.defiPositions.reduce((s, p) => s + (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100, 0);
+  const chartDate = d => new Date(d).toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US", { month: "short", day: "numeric" });
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Card className="p-6 md:p-8">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5">
+          <div>
+            <div className="text-sm mb-2" style={{ color: PALETTE.inkDim }}>{t("totalNetWorth", lang)}</div>
+            <div className="text-4xl md:text-5xl font-semibold tracking-tight" style={{ color: PALETTE.ink }}>{fmtMoney(net, currency, rate)}</div>
+            <div className="mt-2"><StatChip value={changePct} /></div>
+          </div>
+          <div className="flex gap-2 self-start">
+            {["7d", "30d", "365d"].map(r => (
+              <button key={r} onClick={() => setRange(r)} className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                style={{ background: range === r ? PALETTE.teal : "transparent", color: range === r ? "#06120E" : PALETTE.inkDim, border: `1px solid ${range === r ? PALETTE.teal : PALETTE.panelBorder}` }}>
+                {r === "7d" ? t("weekly", lang) : r === "30d" ? t("monthly", lang) : t("yearly", lang)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ height: 220, marginTop: 24 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={shown}>
+              <defs><linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={PALETTE.teal} stopOpacity={0.35} /><stop offset="100%" stopColor={PALETTE.teal} stopOpacity={0} /></linearGradient></defs>
+              <CartesianGrid stroke={PALETTE.panelBorder} strokeDasharray="3 4" vertical={false} />
+              <XAxis dataKey="date" tickFormatter={chartDate} stroke={PALETTE.inkDim} fontSize={11} tickLine={false} axisLine={false} minTickGap={30} />
+              <YAxis stroke={PALETTE.inkDim} fontSize={11} tickLine={false} axisLine={false} tickFormatter={v => currency === "USD" ? `$${Math.round(v)}` : `${Math.round(v * rate / 1e6)}م`} width={56} />
+              <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12 }} labelFormatter={chartDate} formatter={(v) => [fmtMoney(v, currency, rate), t("totalNetWorth", lang)]} />
+              <Area type="monotone" dataKey="value" stroke={PALETTE.teal} strokeWidth={2} fill="url(#netGrad)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card className="p-6">
+          <h3 className="text-sm font-semibold mb-4" style={{ color: PALETTE.ink }}>{t("breakdown", lang)}</h3>
+          {byCategory.length === 0 ? <div className="text-sm py-10 text-center" style={{ color: PALETTE.inkDim }}>{t("emptyBaskets", lang)}</div> : (
+            <div className="flex items-center gap-6">
+              <div style={{ width: 150, height: 150 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={byCategory} dataKey="value" nameKey="cat" innerRadius={45} outerRadius={70} paddingAngle={3} stroke="none">
+                      {byCategory.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12 }} formatter={(v, n) => [fmtMoney(v, currency, rate), catLabel(n, lang)]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 flex flex-col gap-2">
+                {byCategory.sort((a, b) => b.value - a.value).map(e => (
+                  <div key={e.cat} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2" style={{ color: PALETTE.inkDim }}><span className="w-2 h-2 rounded-full" style={{ background: e.color }} />{catLabel(e.cat, lang)}</span>
+                    <span style={{ color: PALETTE.ink }}>{net ? ((e.value / net) * 100).toFixed(1) : 0}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+        <Card className="p-6">
+          <h3 className="text-sm font-semibold mb-4 flex items-center gap-2" style={{ color: PALETTE.ink }}><Sparkles size={15} style={{ color: PALETTE.amber }} /> {t("defiProjection", lang)}</h3>
+          {data.defiPositions.length === 0 ? <div className="text-sm py-10 text-center" style={{ color: PALETTE.inkDim }}>{t("emptyDefi", lang)}</div> : (
+            <>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("monthly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiMonthly, currency, rate)}</div></div>
+                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("yearly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiYearly, currency, rate)}</div></div>
+              </div>
+              <div className="flex flex-col gap-2">
+                {data.defiPositions.map(p => (
+                  <div key={p.id} className="flex items-center justify-between text-xs"><span style={{ color: PALETTE.inkDim }}>{p.name}</span><span style={{ color: PALETTE.ink }}>{p.apy}% APY · {fmtMoney(p.balance, currency, rate)}</span></div>
+                ))}
+              </div>
+            </>
+          )}
+        </Card>
+      </div>
+      <div><Button onClick={openTxModal}><Plus size={16} />{t("addTx", lang)}</Button></div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   PORTFOLIO VIEW
+   ============================================================================ */
+function BasketCard({ basket, lang, currency, rate, onEdit, onDelete, onQuickTx }) {
+  const meta = categoryMeta(basket.category);
+  const Icon = meta.icon;
+  return (
+    <Card className="p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <IconBadge Icon={Icon} color={meta.color} />
+          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{basket.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{catLabel(basket.category, lang)}</div></div>
+        </div>
+        <div className="flex gap-1"><button onClick={() => onEdit(basket)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => onDelete(basket.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+      </div>
+      <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(basket.balance, currency, rate)}</div>
+      <div className="flex gap-2 mt-1">
+        <Button variant="ghost" className="!py-1.5 !px-2.5 text-xs flex-1" onClick={() => onQuickTx(basket, "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
+        <Button variant="ghost" className="!py-1.5 !px-2.5 text-xs flex-1" onClick={() => onQuickTx(basket, "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
+      </div>
+    </Card>
+  );
+}
+function PortfolioView({ data, lang, currency, rate, openBasketModal, deleteBasket, openTxModal }) {
+  const [filter, setFilter] = useState("all");
+  const baskets = filter === "all" ? data.baskets : data.baskets.filter(b => b.category === filter);
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TSelect value={filter} onChange={e => setFilter(e.target.value)} style={{ width: "auto", minWidth: 180 }}>
+          <option value="all">{t("allCategories", lang)}</option>
+          {Object.keys(CATEGORY_META).map(cat => <option key={cat} value={cat}>{catLabel(cat, lang)}</option>)}
+        </TSelect>
+        <Button onClick={() => openBasketModal(null)}><Plus size={16} />{t("addBasket", lang)}</Button>
+      </div>
+      {baskets.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyBaskets", lang)}</Card> : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {baskets.map(b => <BasketCard key={b.id} basket={b} lang={lang} currency={currency} rate={rate} onEdit={openBasketModal} onDelete={deleteBasket} onQuickTx={(basket, type) => openTxModal(basket, "basket", type)} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   WALLETS VIEW
+   ============================================================================ */
+function WalletsView({ data, lang, currency, rate, openBasketModal, deleteBasket, openTxModal }) {
+  const wallets = data.baskets.filter(b => b.category === "hotWallet" || b.category === "coldWallet");
+  return (
+    <div className="flex flex-col gap-5">
+      <Card className="p-4 text-xs" style={{ color: PALETTE.inkDim }}>{t("connectAddressHint", lang)}</Card>
+      <div className="flex justify-end"><Button onClick={() => openBasketModal(null, "hotWallet")}><Plus size={16} />{t("addBasket", lang)}</Button></div>
+      {wallets.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyBaskets", lang)}</Card> : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {wallets.map(w => {
+            const meta = categoryMeta(w.category);
+            const chainLabel = CHAIN_OPTIONS.find(c => c.id === w.chain)?.label || w.chain || "—";
+            return (
+              <Card key={w.id} className="p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <IconBadge Icon={meta.icon} color={meta.color} />
+                    <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{w.name}</div><div className="text-[11px] font-mono" style={{ color: PALETTE.inkDim }}>{w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)} · ` : ""}{chainLabel}</div></div>
+                  </div>
+                  <div className="flex gap-1"><button onClick={() => openBasketModal(w)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteBasket(w.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+                </div>
+                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(w.balance, currency, rate)}</div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(w, "basket", "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
+                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(w, "basket", "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   DEFI VIEW
+   ============================================================================ */
+function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openTxModal }) {
+  const wallets = data.baskets.filter(b => b.category === "hotWallet" || b.category === "coldWallet");
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex justify-end"><Button onClick={() => openDefiModal(null)} disabled={wallets.length === 0}><Plus size={16} />{t("addDefi", lang)}</Button></div>
+      {wallets.length === 0 && <Card className="p-4 text-xs" style={{ color: PALETTE.amber }}>{t("needsWalletFirst", lang)}</Card>}
+      {data.defiPositions.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyDefi", lang)}</Card> : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {data.defiPositions.map(p => {
+            const wallet = data.baskets.find(b => b.id === p.walletId);
+            const monthly = (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12;
+            return (
+              <Card key={p.id} className="p-4 flex flex-col gap-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{p.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"}</div></div></div>
+                  <div className="flex gap-1"><button onClick={() => openDefiModal(p)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteDefi(p.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+                </div>
+                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(p.balance, currency, rate)}</div>
+                <div className="text-xs" style={{ color: PALETTE.amber }}>{p.apy}% APY · {fmtMoney(monthly, currency, rate)}/mo</div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
+                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   LOANS VIEW
+   ============================================================================ */
+function LoanCard({ loan, lang, currency, rate, onEdit, onDelete, onPay }) {
+  const monthly = loanMonthlyPayment(loan.principal, loan.apy, loan.months);
+  const totalOwed = monthly * loan.months;
+  const paid = Number(loan.amountPaid) || 0;
+  const percent = totalOwed > 0 ? (paid / totalOwed) * 100 : 0;
+  const paidOff = percent >= 100;
+  const due = loanNextDueDate(loan);
+  const daysLeft = Math.ceil((due - new Date()) / 864e5);
+  const monthsPaidCount = (loan.payments || []).length;
+  const urgentColor = daysLeft <= 3 ? PALETTE.coral : daysLeft <= 7 ? PALETTE.amber : PALETTE.teal;
+  return (
+    <Card className="p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <IconBadge Icon={LOAN_META.icon} color={LOAN_META.color} />
+          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{loan.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{loan.apy}% APY · {loan.months}mo</div></div>
+        </div>
+        <div className="flex items-center gap-2">
+          {paidOff && <span className="text-[10px] font-medium rounded-full px-2 py-0.5" style={{ background: `${PALETTE.teal}22`, color: PALETTE.teal }}>{t("paidOff", lang)}</span>}
+          <button onClick={() => onEdit(loan)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button>
+          <button onClick={() => onDelete(loan.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div><div style={{ color: PALETTE.inkDim }}>{t("monthlyPayment", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(monthly, currency, rate)}</div></div>
+        <div><div style={{ color: PALETTE.inkDim }}>{t("remaining", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(Math.max(totalOwed - paid, 0), currency, rate)}</div></div>
+      </div>
+      <div>
+        <div className="flex justify-between text-[11px] mb-1" style={{ color: PALETTE.inkDim }}><span>{Math.round(percent)}% {t("paidSoFar", lang)}</span><span>{monthsPaidCount}/{loan.months} {t("monthsPaid", lang)}</span></div>
+        <LinearProgress percent={percent} color={PALETTE.teal} />
+      </div>
+      {!paidOff && (
+        <div className="flex items-center justify-between text-xs pt-2 border-t" style={{ borderColor: PALETTE.panelBorder }}>
+          <span style={{ color: PALETTE.inkDim }}>{t("nextDue", lang)}: {due.toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US")}</span>
+          <span className="font-medium" style={{ color: urgentColor }}>{daysLeft < 0 ? t("overdue", lang) : `${daysLeft} ${t("daysLeft", lang)}`}</span>
+        </div>
+      )}
+      {!paidOff && <Button variant="ghost" className="text-xs !py-1.5" onClick={() => onPay(loan)}><Plus size={13} />{t("logPayment", lang)}</Button>}
+    </Card>
+  );
+}
+function LoansView({ data, lang, currency, rate, openLoanModal, deleteLoan, openPayModal }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex justify-end"><Button onClick={() => openLoanModal(null)}><Plus size={16} />{t("addLoan", lang)}</Button></div>
+      {data.loans.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyLoans", lang)}</Card> : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {data.loans.map(l => <LoanCard key={l.id} loan={l} lang={lang} currency={currency} rate={rate} onEdit={openLoanModal} onDelete={deleteLoan} onPay={openPayModal} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   GOALS VIEW
+   ============================================================================ */
+function GoalCard({ goal, lang, currency, rate, onEdit, onDelete, onTx }) {
+  const percent = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
+  return (
+    <Card className="p-4 flex flex-col items-center gap-3 text-center">
+      <div className="w-full flex items-start justify-between">
+        <IconBadge Icon={GOAL_META.icon} color={GOAL_META.color} />
+        <div className="flex gap-1"><button onClick={() => onEdit(goal)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => onDelete(goal.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+      </div>
+      <CircularProgress percent={percent} color={GOAL_META.color} />
+      <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{goal.name}</div>
+        <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{fmtMoney(goal.currentAmount, currency, rate)} / {fmtMoney(goal.targetAmount, currency, rate)}</div>
+      </div>
+      <div className="flex gap-2 w-full">
+        <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => onTx(goal, "deposit")}><Plus size={13} />{t("contribute", lang)}</Button>
+        <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => onTx(goal, "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
+      </div>
+    </Card>
+  );
+}
+function GoalsView({ data, lang, currency, rate, openGoalModal, deleteGoal, openGoalTxModal }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex justify-end"><Button onClick={() => openGoalModal(null)}><Plus size={16} />{t("addGoal", lang)}</Button></div>
+      {data.goals.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyGoals", lang)}</Card> : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {data.goals.map(g => <GoalCard key={g.id} goal={g} lang={lang} currency={currency} rate={rate} onEdit={openGoalModal} onDelete={deleteGoal} onTx={openGoalTxModal} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   ACTIVITY VIEW (List + categorized Breakdown)
+   ============================================================================ */
+function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
+  const catMeta = a.txCategory ? TX_CATEGORIES[a.txCategory] : null;
+  const Icon = catMeta ? catMeta.icon : (a.type === "deposit" ? Plus : a.type === "withdraw" ? Minus : a.type === "transfer" ? ArrowLeftRight : Sparkles);
+  const color = catMeta ? catMeta.color : (Number(a.amount) >= 0 ? PALETTE.teal : PALETTE.coral);
+  const positive = Number(a.amount) >= 0;
+  return (
+    <div className="flex items-center justify-between gap-3 p-4">
+      <div className="flex items-center gap-3">
+        <IconBadge Icon={Icon} color={color} />
+        <div>
+          <div className="text-sm font-medium" style={{ color: PALETTE.ink }}>
+            {t(a.type, lang)} · {target ? target.name : catLabel(a.category, lang)}
+            {catMeta && <span className="ml-1.5" style={{ color: catMeta.color }}>· {catMeta.label[lang]}</span>}
+          </div>
+          <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{new Date(a.date).toLocaleString(lang === "fa" ? "fa-IR" : "en-US")}{a.note ? ` · ${a.note}` : ""}</div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="text-right">
+          <div className="text-sm font-semibold" style={{ color: positive ? PALETTE.teal : PALETTE.coral }}>{positive ? "+" : ""}{fmtMoney(a.amount, currency, rate)}</div>
+          <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{pct(a.pctOfTotal)} {t("relativeToTotal", lang)}</div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <button onClick={() => onEdit(a)} style={{ color: PALETTE.inkDim }}><Edit3 size={13} /></button>
+          <button onClick={() => onDelete(a.id)} style={{ color: PALETTE.coral }}><Trash2 size={13} /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function ActivityBreakdown({ data, lang, currency, rate }) {
+  const [range, setRange] = useState("30d");
+  const spans = { "7d": 7 * 864e5, "30d": 30 * 864e5, "365d": 365 * 864e5 };
+  const cutoff = Date.now() - spans[range];
+  const inRange = data.activities.filter(a => new Date(a.date).getTime() >= cutoff);
+  const expenses = inRange.filter(a => Number(a.amount) < 0);
+  const income = inRange.filter(a => Number(a.amount) > 0);
+  const groupBy = (arr) => {
+    const map = {};
+    arr.forEach(a => { const key = a.txCategory || "others"; map[key] = (map[key] || 0) + Math.abs(Number(a.amount) || 0); });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]);
+  };
+  const expenseGroups = groupBy(expenses);
+  const incomeGroups = groupBy(income);
+  const totalExpense = expenses.reduce((s, a) => s + Math.abs(Number(a.amount) || 0), 0);
+  const totalIncome = income.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+  const maxExpense = expenseGroups[0]?.[1] || 1;
+  const maxIncome = incomeGroups[0]?.[1] || 1;
+
+  const Group = ({ title, groups, max, total }) => (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{title}</h3>
+        <span className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(total, currency, rate)}</span>
+      </div>
+      {groups.length === 0 ? <div className="text-sm py-6 text-center" style={{ color: PALETTE.inkDim }}>{t("noData", lang)}</div> : (
+        <div className="flex flex-col gap-3">
+          {groups.map(([key, value]) => {
+            const meta = TX_CATEGORIES[key] || TX_CATEGORIES.others;
+            const Icon = meta.icon;
+            return (
+              <div key={key} className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-2" style={{ color: PALETTE.ink }}><Icon size={13} style={{ color: meta.color }} />{meta.label[lang]}</span>
+                  <span style={{ color: PALETTE.inkDim }}>{fmtMoney(value, currency, rate)} · {total ? ((value / total) * 100).toFixed(0) : 0}%</span>
+                </div>
+                <LinearProgress percent={(value / max) * 100} color={meta.color} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex gap-2">
+        {["7d", "30d", "365d"].map(r => (
+          <button key={r} onClick={() => setRange(r)} className="px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ background: range === r ? PALETTE.teal : "transparent", color: range === r ? "#06120E" : PALETTE.inkDim, border: `1px solid ${range === r ? PALETTE.teal : PALETTE.panelBorder}` }}>
+            {r === "7d" ? t("weekly", lang) : r === "30d" ? t("monthly", lang) : t("yearly", lang)}
+          </button>
+        ))}
+      </div>
+      <div className="grid md:grid-cols-2 gap-5">
+        <Group title={t("expenses", lang)} groups={expenseGroups} max={maxExpense} total={totalExpense} />
+        <Group title={t("income", lang)} groups={incomeGroups} max={maxIncome} total={totalIncome} />
+      </div>
+    </div>
+  );
+}
+function ActivityView({ data, lang, currency, rate, openEditActivity, deleteActivity }) {
+  const [tab, setTab] = useState("list");
+  const [filterCat, setFilterCat] = useState("all");
+  const [filterTarget, setFilterTarget] = useState("all");
+  const targets = useMemo(() => allTargetsExtended(data), [data]);
+  const rows = useMemo(() => {
+    return [...data.activities]
+      .filter(a => filterCat === "all" || a.txCategory === filterCat)
+      .filter(a => filterTarget === "all" || a.targetId === filterTarget)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [data.activities, filterCat, filterTarget]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex gap-2">
+        <button onClick={() => setTab("list")} className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5" style={{ background: tab === "list" ? PALETTE.teal : "transparent", color: tab === "list" ? "#06120E" : PALETTE.inkDim, border: `1px solid ${tab === "list" ? PALETTE.teal : PALETTE.panelBorder}` }}><List size={13} />{t("listView", lang)}</button>
+        <button onClick={() => setTab("breakdown")} className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5" style={{ background: tab === "breakdown" ? PALETTE.teal : "transparent", color: tab === "breakdown" ? "#06120E" : PALETTE.inkDim, border: `1px solid ${tab === "breakdown" ? PALETTE.teal : PALETTE.panelBorder}` }}><PieChartIcon size={13} />{t("breakdownView", lang)}</button>
+      </div>
+      {tab === "breakdown" ? <ActivityBreakdown data={data} lang={lang} currency={currency} rate={rate} /> : (
+        <>
+          <div className="flex flex-wrap gap-3">
+            <TSelect value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ width: "auto" }}>
+              <option value="all">{t("allCategories", lang)}</option>
+              {Object.keys(TX_CATEGORIES).map(c => <option key={c} value={c}>{txCatLabel(c, lang)}</option>)}
+            </TSelect>
+            <TSelect value={filterTarget} onChange={e => setFilterTarget(e.target.value)} style={{ width: "auto" }}>
+              <option value="all">{t("selectBasket", lang)}</option>
+              {targets.map(target => <option key={target.id} value={target.id}>{target.name}</option>)}
+            </TSelect>
+          </div>
+          <Card className="divide-y" style={{ borderColor: PALETTE.panelBorder }}>
+            {rows.length === 0 ? <div className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("noData", lang)}</div> : rows.map(a => (
+              <ActivityRow key={a.id} a={a} target={targets.find(x => x.id === a.targetId)} currency={currency} rate={rate} lang={lang} onEdit={openEditActivity} onDelete={deleteActivity} />
+            ))}
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   SETTINGS VIEW
+   ============================================================================ */
+function SettingsView({ data, setData, lang, setLang, currency, setCurrency, openRecurringModal, logRecurring }) {
+  const [fetching, setFetching] = useState(false);
+  const [rateError, setRateError] = useState(null);
+  const targets = useMemo(() => allTargets(data), [data]);
+  const fetchRate = async () => {
+    setFetching(true); setRateError(null);
+    try { const irt = await fetchUsdtRateLive(); setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Math.round(irt) } })); }
+    catch (e) { console.error("USDT rate fetch failed — enter manually.", e); setRateError(String(e.message || e)); }
+    finally { setFetching(false); }
+  };
+  return (
+    <div className="flex flex-col gap-6 max-w-xl">
+      <Card className="p-5 flex flex-col gap-4">
+        <Field label={t("language", lang)}>
+          <div className="flex gap-2">{["en", "fa"].map(l => (
+            <button key={l} onClick={() => setLang(l)} className="flex-1 py-2 rounded-lg text-sm" style={{ background: lang === l ? PALETTE.teal : PALETTE.bgSoft, color: lang === l ? "#06120E" : PALETTE.ink }}>{l === "en" ? "English" : "فارسی"}</button>
+          ))}</div>
+        </Field>
+        <Field label={t("currency", lang)}>
+          <div className="flex gap-2">{["USD", "IRT"].map(c => (
+            <button key={c} onClick={() => setCurrency(c)} className="flex-1 py-2 rounded-lg text-sm" style={{ background: currency === c ? PALETTE.teal : PALETTE.bgSoft, color: currency === c ? "#06120E" : PALETTE.ink }}>{c}</button>
+          ))}</div>
+        </Field>
+        <Field label={t("usdtRate", lang)}>
+          <div className="flex gap-2">
+            <TInput type="number" value={data.settings.usdtToIrt} onChange={e => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(e.target.value) } }))} />
+            <Button variant="ghost" onClick={fetchRate} disabled={fetching}><RefreshCw size={14} className={fetching ? "animate-spin" : ""} /> {t("fetchRate", lang)}</Button>
+          </div>
+          {rateError && <div className="text-[11px]" style={{ color: PALETTE.coral }}>{t("fetchError", lang)}: {rateError}</div>}
+        </Field>
+      </Card>
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{t("recurring", lang)}</h3>
+          <Button variant="ghost" className="!py-1.5 text-xs" onClick={openRecurringModal}><Plus size={13} />{t("addRecurring", lang)}</Button>
+        </div>
+        {data.recurring.length === 0 ? <div className="text-sm" style={{ color: PALETTE.inkDim }}>{t("noData", lang)}</div> : (
+          <div className="flex flex-col gap-2">
+            {data.recurring.map(r => {
+              const target = targets.find(x => x.id === r.targetId);
+              return (
+                <div key={r.id} className="flex items-center justify-between text-sm">
+                  <span style={{ color: PALETTE.ink }}>{r.label} → {target?.name}</span>
+                  <div className="flex items-center gap-2"><span style={{ color: PALETTE.teal }}>{fmtUSD(r.amount)}</span><Button variant="ghost" className="!py-1 !px-2 text-[11px]" onClick={() => logRecurring(r)}>{t("logThisMonth", lang)}</Button></div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================================
+   MODALS
+   ============================================================================ */
+function BasketModal({ initial, defaultCategory, rate, onSave, onClose, lang }) {
+  const [form, setForm] = useState(initial || { name: "", category: defaultCategory || "bank", balance: 0, address: "", chain: "ethereum" });
+  const isWallet = form.category === "hotWallet" || form.category === "coldWallet";
+  return (
+    <Modal title={initial ? t("edit", lang) : t("addBasket", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+        <Field label={t("category", lang)}><TSelect value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{catLabel(c, lang)}</option>)}</TSelect></Field>
+        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v })} rate={rate} lang={lang} />
+        {isWallet && (
+          <>
+            <Field label={t("walletAddress", lang)}><TInput value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="0x… / bc1…" /></Field>
+            <Field label={t("chain", lang)}><TSelect value={form.chain || "ethereum"} onChange={e => setForm({ ...form, chain: e.target.value })}>{CHAIN_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}</TSelect></Field>
+          </>
+        )}
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function DefiModal({ initial, wallets, rate, onSave, onClose, lang }) {
+  const [form, setForm] = useState(initial || { name: "", walletId: wallets[0]?.id || "", balance: 0, apy: "" });
+  return (
+    <Modal title={initial ? t("edit", lang) : t("addDefi", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aave USDC lending" /></Field>
+        <Field label={t("connectedWallet", lang)}><TSelect value={form.walletId} onChange={e => setForm({ ...form, walletId: e.target.value })}>{wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</TSelect></Field>
+        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v })} rate={rate} lang={lang} />
+        <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ ...form, apy: Number(form.apy) || 0 })} disabled={!form.walletId || !form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function LoanModal({ initial, rate, onSave, onClose, lang }) {
+  const [form, setForm] = useState(initial || { name: "", principal: 0, apy: "", months: "", dueDay: "" });
+  return (
+    <Modal title={initial ? t("edit", lang) : t("addLoan", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+        <AmountField label={t("principal", lang)} usdValue={form.principal} onChange={v => setForm({ ...form, principal: v })} rate={rate} lang={lang} />
+        <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
+        <Field label={t("months", lang)}><TInput type="number" value={form.months} onChange={e => setForm({ ...form, months: e.target.value })} placeholder="12" /></Field>
+        <Field label={t("dueDay", lang)}><TInput type="number" min={1} max={28} value={form.dueDay} onChange={e => setForm({ ...form, dueDay: e.target.value })} placeholder="1" /></Field>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ ...form, apy: Number(form.apy) || 0, months: Number(form.months) || 1, dueDay: Number(form.dueDay) || 1 })} disabled={!form.name || !form.principal}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
+  const suggested = loanMonthlyPayment(loan.principal, loan.apy, loan.months);
+  const [amount, setAmount] = useState(suggested);
+  const [basketId, setBasketId] = useState("");
+  const [note, setNote] = useState("");
+  return (
+    <Modal title={`${t("logPayment", lang)} · ${loan.name}`} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
+        <Field label={t("payFrom", lang)}>
+          <TSelect value={basketId} onChange={e => setBasketId(e.target.value)}>
+            <option value="">{t("noAccount", lang)}</option>
+            {baskets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </TSelect>
+        </Field>
+        <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amount, basketId: basketId || null, note })} disabled={!amount}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function GoalModal({ initial, rate, onSave, onClose, lang }) {
+  const [form, setForm] = useState(initial || { name: "", targetAmount: 0, currentAmount: 0 });
+  return (
+    <Modal title={initial ? t("edit", lang) : t("addGoal", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+        <AmountField label={t("targetAmount", lang)} usdValue={form.targetAmount} onChange={v => setForm({ ...form, targetAmount: v })} rate={rate} lang={lang} />
+        <AmountField label={t("currentAmount", lang)} usdValue={form.currentAmount} onChange={v => setForm({ ...form, currentAmount: v })} rate={rate} lang={lang} />
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)} disabled={!form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function GoalTxModal({ goal, type, rate, onSave, onClose, lang }) {
+  const [amount, setAmount] = useState(0);
+  return (
+    <Modal title={`${t(type, lang)} · ${goal.name}`} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(amount)} disabled={!amount}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+function TxModal({ data, initialTargetId, initialTargetType, initialType, editing, rate, onSave, onClose, lang }) {
+  const targets = useMemo(() => allTargets(data), [data]);
+  const [targetKey, setTargetKey] = useState(() => {
+    const first = targets.find(x => x.id === initialTargetId) || targets[0];
+    return first ? `${first.type}:${first.id}` : "";
+  });
+  const [type, setType] = useState(initialType || "deposit");
+  const [amount, setAmount] = useState(editing ? Math.abs(editing.amount) : 0);
+  const [note, setNote] = useState(editing?.note || "");
+  const [txCategory, setTxCategory] = useState(editing?.txCategory || null);
+  const [targetType, targetId] = targetKey ? targetKey.split(":") : [null, null];
+  const target = targets.find(x => x.id === targetId);
+
+  return (
+    <Modal title={editing ? t("editActivity", lang) : t("addTx", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("selectBasket", lang)}>
+          <TSelect value={targetKey} onChange={e => setTargetKey(e.target.value)}>{targets.map(x => <option key={`${x.type}:${x.id}`} value={`${x.type}:${x.id}`}>{x.name}</option>)}</TSelect>
+        </Field>
+        <Field label={t("category", lang)}>
+          <div className="flex gap-2 flex-wrap">
+            {["deposit", "withdraw", "transfer", "interest"].map(ty => (
+              <button key={ty} onClick={() => setType(ty)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ background: type === ty ? PALETTE.teal : PALETTE.bgSoft, color: type === ty ? "#06120E" : PALETTE.ink }}>{t(ty, lang)}</button>
+            ))}
+          </div>
+        </Field>
+        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
+        {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} />}
+        <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
+        {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtUSD(target.balance)}</div>}
+        <div className="flex gap-2 mt-2">
+          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amount, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amount}>{t("save", lang)}</Button>
+          <Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+function RecurringModal({ data, rate, onSave, onClose, lang }) {
+  const targets = useMemo(() => allTargets(data), [data]);
+  const [form, setForm] = useState({ label: "", targetId: targets[0]?.id || "", amount: 0 });
+  return (
+    <Modal title={t("addRecurring", lang)} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label={t("name", lang)}><TInput value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} /></Field>
+        <Field label={t("selectBasket", lang)}><TSelect value={form.targetId} onChange={e => setForm({ ...form, targetId: e.target.value })}>{targets.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</TSelect></Field>
+        <AmountField label={t("amount", lang)} usdValue={form.amount} onChange={v => setForm({ ...form, amount: v })} rate={rate} lang={lang} />
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ============================================================================
+   ROOT APP
+   ============================================================================ */
+export default function WealthDashboard() {
+  const [data, setData, loaded] = useWealthStore();
+  const [view, setView] = useState("dashboard");
+  const [modal, setModal] = useState(null);
+  const lang = data.settings.lang;
+  const currency = data.settings.currency;
+  const rate = data.settings.usdtToIrt;
+  const isFa = lang === "fa";
+  const setLang = (l) => setData(d => ({ ...d, settings: { ...d.settings, lang: typeof l === "function" ? l(d.settings.lang) : l } }));
+  const setCurrency = (c) => setData(d => ({ ...d, settings: { ...d.settings, currency: typeof c === "function" ? c(d.settings.currency) : c } }));
+
+  /* ---------------- basket CRUD ---------------- */
+  const saveBasket = (form) => {
+    setData(d => {
+      const exists = d.baskets.some(b => b.id === form.id);
+      if (exists) return { ...d, baskets: d.baskets.map(b => b.id === form.id ? { ...b, ...form, balance: Number(form.balance) } : b) };
+      const basket = { ...form, id: uid(), createdAt: nowISO(), initialBalance: Number(form.balance) || 0, balance: Number(form.balance) || 0 };
+      return { ...d, baskets: [...d.baskets, basket] };
+    });
+    setModal(null);
+  };
+  const deleteBasket = (id) => setData(d => ({
+    ...d, baskets: d.baskets.filter(b => b.id !== id),
+    defiPositions: d.defiPositions.filter(p => p.walletId !== id),
+    activities: d.activities.filter(a => a.targetId !== id),
+  }));
+
+  /* ---------------- DeFi CRUD ---------------- */
+  const saveDefi = (form) => {
+    setData(d => {
+      const exists = d.defiPositions.some(p => p.id === form.id);
+      if (exists) return { ...d, defiPositions: d.defiPositions.map(p => p.id === form.id ? { ...p, ...form, balance: Number(form.balance) } : p) };
+      const pos = { ...form, id: uid(), createdAt: nowISO(), initialBalance: Number(form.balance) || 0, balance: Number(form.balance) || 0 };
+      return { ...d, defiPositions: [...d.defiPositions, pos] };
+    });
+    setModal(null);
+  };
+  const deleteDefi = (id) => setData(d => ({ ...d, defiPositions: d.defiPositions.filter(p => p.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
+
+  /* ---------------- Loan CRUD ---------------- */
+  const saveLoan = (form) => {
+    setData(d => {
+      const exists = d.loans.some(l => l.id === form.id);
+      if (exists) return { ...d, loans: d.loans.map(l => l.id === form.id ? { ...l, ...form } : l) };
+      const loan = { ...form, id: uid(), createdAt: nowISO(), amountPaid: 0, payments: [] };
+      return { ...d, loans: [...d.loans, loan] };
+    });
+    setModal(null);
+  };
+  const deleteLoan = (id) => setData(d => ({ ...d, loans: d.loans.filter(l => l.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
+  const logLoanPayment = (loan, { amount, basketId, note }) => {
+    setData(d => {
+      const loans = d.loans.map(l => l.id === loan.id ? { ...l, amountPaid: (Number(l.amountPaid) || 0) + amount, payments: [...(l.payments || []), { id: uid(), date: nowISO(), amount }] } : l);
+      const baskets = basketId ? d.baskets.map(b => b.id === basketId ? { ...b, balance: (Number(b.balance) || 0) - amount } : b) : d.baskets;
+      const activity = {
+        id: uid(), date: nowISO(), type: "withdraw",
+        targetId: basketId || loan.id, targetType: basketId ? "basket" : "loan",
+        category: basketId ? (d.baskets.find(b => b.id === basketId)?.category || "loan") : "loan",
+        amount: -Math.abs(amount), note: note || `${t("logPayment", lang)}: ${loan.name}`,
+        txCategory: "loan", pctOfTotal: 0,
+      };
+      return { ...d, loans, baskets, activities: [...d.activities, activity] };
+    });
+    setModal(null);
+  };
+
+  /* ---------------- Goal CRUD ---------------- */
+  const saveGoal = (form) => {
+    setData(d => {
+      const exists = d.goals.some(g => g.id === form.id);
+      if (exists) return { ...d, goals: d.goals.map(g => g.id === form.id ? { ...g, ...form } : g) };
+      const goal = { ...form, id: uid(), createdAt: nowISO() };
+      return { ...d, goals: [...d.goals, goal] };
+    });
+    setModal(null);
+  };
+  const deleteGoal = (id) => setData(d => ({ ...d, goals: d.goals.filter(g => g.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
+  const goalTx = (goal, type, amount) => {
+    setData(d => {
+      const signed = type === "withdraw" ? -Math.abs(amount) : Math.abs(amount);
+      const goals = d.goals.map(g => g.id === goal.id ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) + signed, 0) } : g);
+      const activity = { id: uid(), date: nowISO(), type, targetId: goal.id, targetType: "goal", category: "goal", amount: signed, note: goal.name, txCategory: null, pctOfTotal: 0 };
+      return { ...d, goals, activities: [...d.activities, activity] };
+    });
+    setModal(null);
+  };
+
+  /* ---------------- transaction (ledger) — create + edit ---------------- */
+  const applyTargetDelta = (d, targetType, targetId, delta) => {
+    if (targetType === "basket") return { ...d, baskets: d.baskets.map(b => b.id === targetId ? { ...b, balance: (Number(b.balance) || 0) + delta } : b) };
+    if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
+    return d;
+  };
+  const saveTx = ({ id, targetId, targetType, type, amount, note, txCategory }) => {
+    setData(d => {
+      const signedAmount = (type === "withdraw") ? -Math.abs(amount) : Math.abs(amount);
+      let next = d;
+      if (id) {
+        // Editing: revert the old amount's effect, then apply the new one.
+        const old = d.activities.find(a => a.id === id);
+        if (old) next = applyTargetDelta(next, old.targetType, old.targetId, -old.amount);
+      }
+      next = applyTargetDelta(next, targetType, targetId, signedAmount);
+      const prevTotal = totalNetWorth(next);
+      const pctOfTotal = prevTotal !== 0 ? (signedAmount / Math.abs(prevTotal)) * 100 : (signedAmount !== 0 ? 100 : 0);
+      const category = targetType === "defi" ? "defi" : next.baskets.find(b => b.id === targetId)?.category;
+      const activity = { id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(), type, targetId, targetType, category, amount: signedAmount, note, txCategory, pctOfTotal };
+      const activities = id ? next.activities.map(a => a.id === id ? activity : a) : [...next.activities, activity];
+      return { ...next, activities };
+    });
+    setModal(null);
+  };
+  const deleteActivity = (id) => {
+    setData(d => {
+      const old = d.activities.find(a => a.id === id);
+      if (!old) return d;
+      let next = applyTargetDelta(d, old.targetType, old.targetId, -old.amount);
+      if (old.targetType === "loan") next = { ...next, loans: next.loans.map(l => l.id === old.targetId ? { ...l, amountPaid: Math.max((Number(l.amountPaid) || 0) - Math.abs(old.amount), 0) } : l) };
+      if (old.targetType === "goal") next = { ...next, goals: next.goals.map(g => g.id === old.targetId ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) - old.amount, 0) } : g) };
+      return { ...next, activities: next.activities.filter(a => a.id !== id) };
+    });
+  };
+
+
+  /* ---------------- recurring income ---------------- */
+  const saveRecurring = (form) => { setData(d => ({ ...d, recurring: [...d.recurring, { ...form, id: uid() }] })); setModal(null); };
+  const logRecurring = (r) => {
+    const targets = allTargets(data);
+    const target = targets.find(x => x.id === r.targetId);
+    if (!target) return;
+    saveTx({ targetId: r.targetId, targetType: target.type, type: "interest", amount: r.amount, note: r.label, txCategory: null });
+  };
+
+  /* ---------------- CSV export ---------------- */
+  const exportCSV = () => {
+    const targets = allTargetsExtended(data);
+    const header = ["Date", "Type", "Target", "Target Type", "Spending Category", "Amount(USD)", "% of Total", "Note"];
+    const rows = data.activities.map(a => {
+      const target = targets.find(x => x.id === a.targetId);
+      return [a.date, a.type, target?.name || "", a.targetType, a.txCategory || "", a.amount, a.pctOfTotal?.toFixed(2), a.note || ""];
+    });
+    downloadCSV([header, ...rows], `wealth-activity-${Date.now()}.csv`);
+  };
+
+  if (!loaded) return <div className="min-h-screen flex items-center justify-center" style={{ background: PALETTE.bg, color: PALETTE.inkDim }}>Loading…</div>;
+
+  const wallets = data.baskets.filter(b => b.category === "hotWallet" || b.category === "coldWallet");
+
+  return (
+    <div dir={isFa ? "rtl" : "ltr"} className="min-h-screen w-full flex" style={{ background: PALETTE.bg, color: PALETTE.ink, fontFamily: isFa ? "'Vazirmatn', sans-serif" : "'Space Grotesk','Lotto',sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap');
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: ${PALETTE.panelBorder}; border-radius: 8px; }
+      `}</style>
+      <Sidebar view={view} setView={setView} lang={lang} />
+      <div className="flex-1 flex flex-col pb-16 md:pb-0">
+        <Header lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} onExport={exportCSV} view={view} />
+        <main className="flex-1 px-5 md:px-8 py-6">
+          {view === "dashboard" && <DashboardView data={data} lang={lang} currency={currency} rate={rate} openTxModal={() => setModal({ kind: "tx" })} />}
+          {view === "portfolio" && (
+            <PortfolioView data={data} lang={lang} currency={currency} rate={rate}
+              openBasketModal={(b, defCat) => setModal({ kind: "basket", payload: b, defaultCategory: defCat })}
+              deleteBasket={deleteBasket}
+              openTxModal={(basket, targetType, type) => setModal({ kind: "tx", payload: { targetId: basket.id, targetType, type } })} />
+          )}
+          {view === "wallets" && (
+            <WalletsView data={data} lang={lang} currency={currency} rate={rate}
+              openBasketModal={(b, defCat) => setModal({ kind: "basket", payload: b, defaultCategory: defCat })}
+              deleteBasket={deleteBasket}
+              openTxModal={(basket, targetType, type) => setModal({ kind: "tx", payload: { targetId: basket.id, targetType, type } })} />
+          )}
+          {view === "defi" && (
+            <DefiView data={data} lang={lang} currency={currency} rate={rate}
+              openDefiModal={(p) => setModal({ kind: "defi", payload: p })} deleteDefi={deleteDefi}
+              openTxModal={(pos, targetType, type) => setModal({ kind: "tx", payload: { targetId: pos.id, targetType, type } })} />
+          )}
+          {view === "loans" && (
+            <LoansView data={data} lang={lang} currency={currency} rate={rate}
+              openLoanModal={(l) => setModal({ kind: "loan", payload: l })} deleteLoan={deleteLoan}
+              openPayModal={(l) => setModal({ kind: "loanPay", payload: l })} />
+          )}
+          {view === "goals" && (
+            <GoalsView data={data} lang={lang} currency={currency} rate={rate}
+              openGoalModal={(g) => setModal({ kind: "goal", payload: g })} deleteGoal={deleteGoal}
+              openGoalTxModal={(g, type) => setModal({ kind: "goalTx", payload: g, txType: type })} />
+          )}
+          {view === "activity" && <ActivityView data={data} lang={lang} currency={currency} rate={rate}
+            openEditActivity={(a) => setModal({ kind: "tx", payload: { targetId: a.targetId, targetType: a.targetType }, editing: a })}
+            deleteActivity={deleteActivity} />}
+          {view === "settings" && <SettingsView data={data} setData={setData} lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} openRecurringModal={() => setModal({ kind: "recurring" })} logRecurring={logRecurring} />}
+        </main>
+      </div>
+      <MobileNav view={view} setView={setView} lang={lang} />
+
+      {modal?.kind === "basket" && <BasketModal initial={modal.payload} defaultCategory={modal.defaultCategory} rate={rate} lang={lang} onSave={saveBasket} onClose={() => setModal(null)} />}
+      {modal?.kind === "defi" && <DefiModal initial={modal.payload} wallets={wallets} rate={rate} lang={lang} onSave={saveDefi} onClose={() => setModal(null)} />}
+      {modal?.kind === "loan" && <LoanModal initial={modal.payload} rate={rate} lang={lang} onSave={saveLoan} onClose={() => setModal(null)} />}
+      {modal?.kind === "loanPay" && <LoanPaymentModal loan={modal.payload} baskets={data.baskets} rate={rate} lang={lang} onSave={(payload) => logLoanPayment(modal.payload, payload)} onClose={() => setModal(null)} />}
+      {modal?.kind === "goal" && <GoalModal initial={modal.payload} rate={rate} lang={lang} onSave={saveGoal} onClose={() => setModal(null)} />}
+      {modal?.kind === "goalTx" && <GoalTxModal goal={modal.payload} type={modal.txType} rate={rate} lang={lang} onSave={(amt) => goalTx(modal.payload, modal.txType, amt)} onClose={() => setModal(null)} />}
+      {modal?.kind === "tx" && (
+        <TxModal data={data} initialTargetId={modal.payload?.targetId} initialTargetType={modal.payload?.targetType} initialType={modal.payload?.type} editing={modal.editing}
+          rate={rate} lang={lang} onSave={saveTx} onClose={() => setModal(null)} />
+      )}
+      {modal?.kind === "recurring" && <RecurringModal data={data} rate={rate} lang={lang} onSave={saveRecurring} onClose={() => setModal(null)} />}
+    </div>
+  );
+}
