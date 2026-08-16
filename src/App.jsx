@@ -4,7 +4,7 @@ import {
   TrendingUp, Shield, Banknote, PiggyBank, History, Settings as SettingsIcon,
   Plus, Minus, RefreshCw, Download, X, Globe, ArrowUpRight, ArrowDownRight,
   Trash2, Edit3, ArrowLeftRight, Sparkles, ShoppingCart, UtensilsCrossed, Wifi,
-  Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon
+  Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon, Coins
 } from "lucide-react";
 import {
   ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -45,7 +45,7 @@ function categoryMeta(cat) {
   return CATEGORY_META[cat];
 }
 
-// Spending/income categories for the ledger — separate from account type.
+// Spending/income categories for the PoolaKoo — separate from account type.
 const TX_CATEGORIES = {
   groceries:  { label: { en: "Groceries", fa: "خواربار" }, icon: ShoppingCart, color: "#5CE8A0" },
   restaurant: { label: { en: "Restaurant", fa: "رستوران" }, icon: UtensilsCrossed, color: "#E8B15C" },
@@ -75,7 +75,7 @@ async function fetchUsdtRateLive() {
 
 /* --------------------------------- i18n ----------------------------------- */
 const STR = {
-  appName: { en: "Ledger.", fa: "لجر." },
+  appName: { en: "PoolaKoo?", fa: "پولاکو؟." },
   tagline: { en: "your wealth, in one quiet room", fa: "ثروت شما، در یک اتاق آرام" },
   nav: {
     dashboard: { en: "Dashboard", fa: "داشبورد" }, portfolio: { en: "Portfolio", fa: "پرتفوی" },
@@ -99,7 +99,9 @@ const STR = {
   interest: { en: "Interest", fa: "سود" }, transfer: { en: "Transfer", fa: "انتقال" },
   note: { en: "Note (optional)", fa: "یادداشت (اختیاری)" }, walletAddress: { en: "Wallet Address", fa: "آدرس کیف‌پول" },
   allCategories: { en: "All categories", fa: "همه دسته‌ها" },
-  usdtRate: { en: "USDT → IRT rate", fa: "نرخ تتر به تومان" }, fetchRate: { en: "Fetch live rate", fa: "دریافت نرخ زنده" },
+  usdtRate: { en: "USDT → IRT rate (manual override)", fa: "نرخ تتر به تومان (ورود دستی)" },
+  liveRateTitle: { en: "Live USDT rate", fa: "نرخ زنده تتر" },
+  rateUnavailable: { en: "Rate unavailable — tap to retry", fa: "نرخ در دسترس نیست — برای تلاش دوباره ضربه بزنید" },
   language: { en: "Language", fa: "زبان" }, currency: { en: "Currency", fa: "واحد پول" },
   emptyBaskets: { en: "No baskets yet — create your first one.", fa: "هنوز بسکتی نساخته‌اید." },
   recurring: { en: "Recurring Monthly Income", fa: "درآمد ماهانه ثابت" }, addRecurring: { en: "Add Recurring", fa: "افزودن مورد ثابت" },
@@ -109,7 +111,7 @@ const STR = {
     en: "Paste an EVM/BTC/Solana address to label a wallet. Balances are entered manually — use the Deposit/Withdraw buttons to keep them current.",
     fa: "آدرس EVM/بیت‌کوین/سولانا را برای برچسب‌گذاری کیف‌پول وارد کنید. موجودی به‌صورت دستی وارد می‌شود."
   },
-  chain: { en: "Blockchain", fa: "شبکه" }, fetchError: { en: "Fetch failed", fa: "دریافت ناموفق بود" },
+  chain: { en: "Blockchain", fa: "شبکه" },
   addDefi: { en: "New DeFi Position", fa: "پوزیشن دیفای جدید" }, connectedWallet: { en: "Connected Wallet", fa: "کیف‌پول متصل" },
   emptyDefi: { en: "No DeFi positions yet — connect one to a wallet.", fa: "هنوز پوزیشن دیفای نساخته‌اید." },
   needsWalletFirst: { en: "Add a hot or cold wallet before creating a DeFi position.", fa: "قبل از ساخت پوزیشن دیفای، یک کیف‌پول اضافه کنید." },
@@ -339,7 +341,7 @@ function filterSeries(series, range) {
   const filtered = series.filter(p => new Date(p.date).getTime() >= cutoff);
   return filtered.length > 1 ? filtered : series.slice(-2);
 }
-// Baskets + DeFi — used where a ledger entry must move real balances.
+// Baskets + DeFi — used where a PoolaKoo entry must move real balances.
 function allTargets(data) {
   return [
     ...data.baskets.map(b => ({ id: b.id, name: b.name, type: "basket", category: b.category, balance: b.balance })),
@@ -400,11 +402,19 @@ function MobileNav({ view, setView, lang }) {
     </nav>
   );
 }
-function Header({ lang, setLang, currency, setCurrency, onExport, view }) {
+function Header({ lang, setLang, currency, setCurrency, onExport, view, rate, liveRate, onRefreshRate }) {
+  const rateTitle = liveRate.error
+    ? t("rateUnavailable", lang)
+    : `${t("liveRateTitle", lang)}: ${fmtIRT(1, rate)}${liveRate.updatedAt ? " · " + new Date(liveRate.updatedAt).toLocaleTimeString(lang === "fa" ? "fa-IR" : "en-US") : ""}`;
   return (
     <header className="flex items-center justify-between px-5 md:px-8 py-5 sticky top-0 z-30 backdrop-blur" style={{ background: `${PALETTE.bg}E6`, borderBottom: `1px solid ${PALETTE.panelBorder}` }}>
       <h1 className="text-lg font-semibold capitalize" style={{ color: PALETTE.ink }}>{STR.nav[view] ? STR.nav[view][lang] : view}</h1>
       <div className="flex items-center gap-2">
+        <button onClick={onRefreshRate} title={rateTitle} className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium"
+          style={{ border: `1px solid ${liveRate.error ? `${PALETTE.coral}55` : PALETTE.panelBorder}`, color: liveRate.error ? PALETTE.coral : PALETTE.ink }}>
+          <Coins size={14} style={{ color: PALETTE.amber }} />
+          {liveRate.loading ? <RefreshCw size={12} className="animate-spin" /> : <span>{Math.round(rate).toLocaleString("en-US")}</span>}
+        </button>
         <button onClick={onExport} title={t("export", lang)} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }}><Download size={16} /></button>
         <button onClick={() => setCurrency(c => c === "USD" ? "IRT" : "USD")} className="p-2 rounded-lg text-xs font-semibold w-12" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.ink }}>{currency}</button>
         <button onClick={() => setLang(l => l === "en" ? "fa" : "en")} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }} title={t("language", lang)}><Globe size={16} /></button>
@@ -864,15 +874,7 @@ function ActivityView({ data, lang, currency, rate, openEditActivity, deleteActi
    SETTINGS VIEW
    ============================================================================ */
 function SettingsView({ data, setData, lang, setLang, currency, setCurrency, openRecurringModal, logRecurring }) {
-  const [fetching, setFetching] = useState(false);
-  const [rateError, setRateError] = useState(null);
   const targets = useMemo(() => allTargets(data), [data]);
-  const fetchRate = async () => {
-    setFetching(true); setRateError(null);
-    try { const irt = await fetchUsdtRateLive(); setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Math.round(irt) } })); }
-    catch (e) { console.error("USDT rate fetch failed — enter manually.", e); setRateError(String(e.message || e)); }
-    finally { setFetching(false); }
-  };
   return (
     <div className="flex flex-col gap-6 max-w-xl">
       <Card className="p-5 flex flex-col gap-4">
@@ -887,11 +889,7 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
           ))}</div>
         </Field>
         <Field label={t("usdtRate", lang)}>
-          <div className="flex gap-2">
-            <TInput type="number" value={data.settings.usdtToIrt} onChange={e => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(e.target.value) } }))} />
-            <Button variant="ghost" onClick={fetchRate} disabled={fetching}><RefreshCw size={14} className={fetching ? "animate-spin" : ""} /> {t("fetchRate", lang)}</Button>
-          </div>
-          {rateError && <div className="text-[11px]" style={{ color: PALETTE.coral }}>{t("fetchError", lang)}: {rateError}</div>}
+          <TInput type="number" value={data.settings.usdtToIrt} onChange={e => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(e.target.value) } }))} />
         </Field>
       </Card>
       <Card className="p-5">
@@ -1074,12 +1072,29 @@ export default function WealthDashboard() {
   const [data, setData, loaded] = useWealthStore();
   const [view, setView] = useState("dashboard");
   const [modal, setModal] = useState(null);
+  const [liveRate, setLiveRate] = useState({ loading: true, error: null, updatedAt: null });
   const lang = data.settings.lang;
   const currency = data.settings.currency;
   const rate = data.settings.usdtToIrt;
   const isFa = lang === "fa";
   const setLang = (l) => setData(d => ({ ...d, settings: { ...d.settings, lang: typeof l === "function" ? l(d.settings.lang) : l } }));
   const setCurrency = (c) => setData(d => ({ ...d, settings: { ...d.settings, currency: typeof c === "function" ? c(d.settings.currency) : c } }));
+
+  // Fetch the live USDT→IRT rate once whenever the app is opened, and let
+  // the header's rate badge trigger a manual retry/refresh on click.
+  const refreshLiveRate = () => {
+    setLiveRate(r => ({ ...r, loading: true, error: null }));
+    fetchUsdtRateLive()
+      .then(irt => {
+        setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Math.round(irt) } }));
+        setLiveRate({ loading: false, error: null, updatedAt: nowISO() });
+      })
+      .catch(e => {
+        console.error("USDT rate fetch failed — keeping last known/manual rate.", e);
+        setLiveRate({ loading: false, error: String(e.message || e), updatedAt: null });
+      });
+  };
+  useEffect(() => { refreshLiveRate(); }, []);
 
   /* ---------------- basket CRUD ---------------- */
   const saveBasket = (form) => {
@@ -1157,7 +1172,7 @@ export default function WealthDashboard() {
     setModal(null);
   };
 
-  /* ---------------- transaction (ledger) — create + edit ---------------- */
+  /* ---------------- transaction (PoolaKoo) — create + edit ---------------- */
   const applyTargetDelta = (d, targetType, targetId, delta) => {
     if (targetType === "basket") return { ...d, baskets: d.baskets.map(b => b.id === targetId ? { ...b, balance: (Number(b.balance) || 0) + delta } : b) };
     if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
@@ -1228,7 +1243,7 @@ export default function WealthDashboard() {
       `}</style>
       <Sidebar view={view} setView={setView} lang={lang} />
       <div className="flex-1 flex flex-col pb-16 md:pb-0">
-        <Header lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} onExport={exportCSV} view={view} />
+        <Header lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} onExport={exportCSV} view={view} rate={rate} liveRate={liveRate} onRefreshRate={refreshLiveRate} />
         <main className="flex-1 px-5 md:px-8 py-6">
           {view === "dashboard" && <DashboardView data={data} lang={lang} currency={currency} rate={rate} openTxModal={() => setModal({ kind: "tx" })} />}
           {view === "portfolio" && (
