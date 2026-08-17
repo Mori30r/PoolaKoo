@@ -4,7 +4,7 @@ import {
   TrendingUp, Shield, Banknote, PiggyBank, History, Settings as SettingsIcon,
   Plus, Minus, RefreshCw, Download, X, Globe, ArrowUpRight, ArrowDownRight,
   Trash2, Edit3, ArrowLeftRight, Sparkles, ShoppingCart, UtensilsCrossed, Wifi,
-  Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon, Coins
+  Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon, Coins, Upload
 } from "lucide-react";
 import {
   ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -45,7 +45,7 @@ function categoryMeta(cat) {
   return CATEGORY_META[cat];
 }
 
-// Spending/income categories for the PoolaKoo — separate from account type.
+// Spending/income categories for the ledger — separate from account type.
 const TX_CATEGORIES = {
   groceries:  { label: { en: "Groceries", fa: "خواربار" }, icon: ShoppingCart, color: "#5CE8A0" },
   restaurant: { label: { en: "Restaurant", fa: "رستوران" }, icon: UtensilsCrossed, color: "#E8B15C" },
@@ -75,7 +75,7 @@ async function fetchUsdtRateLive() {
 
 /* --------------------------------- i18n ----------------------------------- */
 const STR = {
-  appName: { en: "PoolaKoo?", fa: "پولاکو؟." },
+  appName: { en: "PoolaKoo", fa: "پولاکو" },
   tagline: { en: "your wealth, in one quiet room", fa: "ثروت شما، در یک اتاق آرام" },
   nav: {
     dashboard: { en: "Dashboard", fa: "داشبورد" }, portfolio: { en: "Portfolio", fa: "پرتفوی" },
@@ -87,7 +87,6 @@ const STR = {
   totalNetWorth: { en: "Total Net Worth", fa: "ارزش خالص کل" },
   addBasket: { en: "New Basket", fa: "بسکت جدید" },
   addTx: { en: "Add / Subtract", fa: "افزودن / کسر" },
-  export: { en: "Export CSV", fa: "خروجی CSV" },
   breakdown: { en: "Portfolio Breakdown", fa: "تفکیک پرتفوی" },
   defiProjection: { en: "DeFi Yield Projection", fa: "پیش‌بینی سود دیفای" },
   monthly: { en: "Monthly", fa: "ماهانه" }, yearly: { en: "Yearly", fa: "سالانه" }, weekly: { en: "Weekly", fa: "هفتگی" },
@@ -105,6 +104,13 @@ const STR = {
   language: { en: "Language", fa: "زبان" }, currency: { en: "Currency", fa: "واحد پول" },
   emptyBaskets: { en: "No baskets yet — create your first one.", fa: "هنوز بسکتی نساخته‌اید." },
   recurring: { en: "Recurring Monthly Income", fa: "درآمد ماهانه ثابت" }, addRecurring: { en: "Add Recurring", fa: "افزودن مورد ثابت" },
+  backupRestore: { en: "Backup & Restore", fa: "پشتیبان‌گیری و بازیابی" },
+  exportBackup: { en: "Export Backup", fa: "خروجی پشتیبان" },
+  importBackup: { en: "Import Backup", fa: "وارد کردن پشتیبان" },
+  backupHint: { en: "Export saves everything on this device to a file. Import replaces all current data with that file's contents.", fa: "خروجی، همه اطلاعات این دستگاه را در یک فایل ذخیره می‌کند. وارد کردن، تمام داده‌های فعلی را با محتوای آن فایل جایگزین می‌کند." },
+  importConfirm: { en: "This will replace all current data with the backup file. Continue?", fa: "این کار تمام داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟" },
+  importSuccess: { en: "Backup imported successfully.", fa: "پشتیبان با موفقیت وارد شد." },
+  importError: { en: "Could not read that file — make sure it's a backup exported from this app.", fa: "این فایل قابل خواندن نیست — مطمئن شوید فایل پشتیبان همین برنامه است." },
   logThisMonth: { en: "Log this month", fa: "ثبت این ماه" }, selectBasket: { en: "Target", fa: "مقصد" },
   relativeToTotal: { en: "of net worth", fa: "از ارزش کل" },
   connectAddressHint: {
@@ -144,6 +150,12 @@ function pct(n) { const v = Number(n) || 0; const sign = v > 0 ? "+" : ""; retur
 function downloadCSV(rows, filename) {
   const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
@@ -341,7 +353,7 @@ function filterSeries(series, range) {
   const filtered = series.filter(p => new Date(p.date).getTime() >= cutoff);
   return filtered.length > 1 ? filtered : series.slice(-2);
 }
-// Baskets + DeFi — used where a PoolaKoo entry must move real balances.
+// Baskets + DeFi — used where a ledger entry must move real balances.
 function allTargets(data) {
   return [
     ...data.baskets.map(b => ({ id: b.id, name: b.name, type: "basket", category: b.category, balance: b.balance })),
@@ -368,7 +380,7 @@ function Sidebar({ view, setView, lang }) {
   return (
     <aside className="hidden md:flex flex-col w-60 shrink-0 h-screen sticky top-0 px-4 py-6 border-r" style={{ borderColor: PALETTE.panelBorder }}>
       <div className="flex items-center gap-2.5 px-2 mb-8">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold" style={{ background: PALETTE.teal, color: "#06120E" }}>L</div>
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold" style={{ background: PALETTE.teal, color: "#06120E" }}>P</div>
         <div>
           <div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{t("appName", lang)}</div>
           <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("tagline", lang)}</div>
@@ -402,7 +414,7 @@ function MobileNav({ view, setView, lang }) {
     </nav>
   );
 }
-function Header({ lang, setLang, currency, setCurrency, onExport, view, rate, liveRate, onRefreshRate }) {
+function Header({ lang, setLang, currency, setCurrency, view, rate, liveRate, onRefreshRate }) {
   const rateTitle = liveRate.error
     ? t("rateUnavailable", lang)
     : `${t("liveRateTitle", lang)}: ${fmtIRT(1, rate)}${liveRate.updatedAt ? " · " + new Date(liveRate.updatedAt).toLocaleTimeString(lang === "fa" ? "fa-IR" : "en-US") : ""}`;
@@ -415,7 +427,6 @@ function Header({ lang, setLang, currency, setCurrency, onExport, view, rate, li
           <Coins size={14} style={{ color: PALETTE.amber }} />
           {liveRate.loading ? <RefreshCw size={12} className="animate-spin" /> : <span>{Math.round(rate).toLocaleString("en-US")}</span>}
         </button>
-        <button onClick={onExport} title={t("export", lang)} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }}><Download size={16} /></button>
         <button onClick={() => setCurrency(c => c === "USD" ? "IRT" : "USD")} className="p-2 rounded-lg text-xs font-semibold w-12" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.ink }}>{currency}</button>
         <button onClick={() => setLang(l => l === "en" ? "fa" : "en")} className="p-2 rounded-lg" style={{ border: `1px solid ${PALETTE.panelBorder}`, color: PALETTE.inkDim }} title={t("language", lang)}><Globe size={16} /></button>
       </div>
@@ -472,7 +483,7 @@ function DashboardView({ data, lang, currency, rate, openTxModal }) {
               <CartesianGrid stroke={PALETTE.panelBorder} strokeDasharray="3 4" vertical={false} />
               <XAxis dataKey="date" tickFormatter={chartDate} stroke={PALETTE.inkDim} fontSize={11} tickLine={false} axisLine={false} minTickGap={30} />
               <YAxis stroke={PALETTE.inkDim} fontSize={11} tickLine={false} axisLine={false} tickFormatter={v => currency === "USD" ? `$${Math.round(v)}` : `${Math.round(v * rate / 1e6)}م`} width={56} />
-              <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12 }} labelFormatter={chartDate} formatter={(v) => [fmtMoney(v, currency, rate), t("totalNetWorth", lang)]} />
+              <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12, color: PALETTE.ink }} itemStyle={{ color: PALETTE.ink }} labelStyle={{ color: PALETTE.inkDim }} labelFormatter={chartDate} formatter={(v) => [fmtMoney(v, currency, rate), t("totalNetWorth", lang)]} />
               <Area type="monotone" dataKey="value" stroke={PALETTE.teal} strokeWidth={2} fill="url(#netGrad)" />
             </AreaChart>
           </ResponsiveContainer>
@@ -489,7 +500,7 @@ function DashboardView({ data, lang, currency, rate, openTxModal }) {
                     <Pie data={byCategory} dataKey="value" nameKey="cat" innerRadius={45} outerRadius={70} paddingAngle={3} stroke="none">
                       {byCategory.map((e, i) => <Cell key={i} fill={e.color} />)}
                     </Pie>
-                    <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12 }} formatter={(v, n) => [fmtMoney(v, currency, rate), catLabel(n, lang)]} />
+                    <Tooltip contentStyle={{ background: PALETTE.bgSoft, border: `1px solid ${PALETTE.panelBorder}`, borderRadius: 10, fontSize: 12, color: PALETTE.ink }} itemStyle={{ color: PALETTE.ink }} labelStyle={{ color: PALETTE.inkDim }} formatter={(v, n) => [fmtMoney(v, currency, rate), catLabel(n, lang)]} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -873,8 +884,23 @@ function ActivityView({ data, lang, currency, rate, openEditActivity, deleteActi
 /* ============================================================================
    SETTINGS VIEW
    ============================================================================ */
-function SettingsView({ data, setData, lang, setLang, currency, setCurrency, openRecurringModal, logRecurring }) {
+function SettingsView({ data, setData, lang, setLang, currency, setCurrency, openRecurringModal, logRecurring, onExportBackup, onImportBackup }) {
   const targets = useMemo(() => allTargets(data), [data]);
+  const fileInputRef = useRef(null);
+  const [importMsg, setImportMsg] = useState(null); // { type: 'success'|'error', text }
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    if (!window.confirm(t("importConfirm", lang))) return;
+    try {
+      await onImportBackup(file);
+      setImportMsg({ type: "success", text: t("importSuccess", lang) });
+    } catch (err) {
+      console.error("Import failed", err);
+      setImportMsg({ type: "error", text: t("importError", lang) });
+    }
+  };
   return (
     <div className="flex flex-col gap-6 max-w-xl">
       <Card className="p-5 flex flex-col gap-4">
@@ -891,6 +917,16 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
         <Field label={t("usdtRate", lang)}>
           <TInput type="number" value={data.settings.usdtToIrt} onChange={e => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(e.target.value) } }))} />
         </Field>
+      </Card>
+      <Card className="p-5 flex flex-col gap-3">
+        <h3 className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{t("backupRestore", lang)}</h3>
+        <p className="text-xs" style={{ color: PALETTE.inkDim }}>{t("backupHint", lang)}</p>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onExportBackup}><Download size={14} />{t("exportBackup", lang)}</Button>
+          <Button variant="ghost" onClick={() => fileInputRef.current?.click()}><Upload size={14} />{t("importBackup", lang)}</Button>
+          <input ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={handleFileChange} />
+        </div>
+        {importMsg && <div className="text-[11px]" style={{ color: importMsg.type === "success" ? PALETTE.teal : PALETTE.coral }}>{importMsg.text}</div>}
       </Card>
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
@@ -1172,7 +1208,7 @@ export default function WealthDashboard() {
     setModal(null);
   };
 
-  /* ---------------- transaction (PoolaKoo) — create + edit ---------------- */
+  /* ---------------- transaction (ledger) — create + edit ---------------- */
   const applyTargetDelta = (d, targetType, targetId, delta) => {
     if (targetType === "basket") return { ...d, baskets: d.baskets.map(b => b.id === targetId ? { ...b, balance: (Number(b.balance) || 0) + delta } : b) };
     if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
@@ -1218,16 +1254,30 @@ export default function WealthDashboard() {
     saveTx({ targetId: r.targetId, targetType: target.type, type: "interest", amount: r.amount, note: r.label, txCategory: null });
   };
 
-  /* ---------------- CSV export ---------------- */
-  const exportCSV = () => {
-    const targets = allTargetsExtended(data);
-    const header = ["Date", "Type", "Target", "Target Type", "Spending Category", "Amount(USD)", "% of Total", "Note"];
-    const rows = data.activities.map(a => {
-      const target = targets.find(x => x.id === a.targetId);
-      return [a.date, a.type, target?.name || "", a.targetType, a.txCategory || "", a.amount, a.pctOfTotal?.toFixed(2), a.note || ""];
-    });
-    downloadCSV([header, ...rows], `wealth-activity-${Date.now()}.csv`);
+  /* ---------------- full backup export / import ---------------- */
+  const exportBackup = () => {
+    const payload = { app: "ledger-wealth-dashboard", version: 1, exportedAt: nowISO(), data };
+    downloadJSON(payload, `ledger-backup-${Date.now()}.json`);
   };
+  const importBackup = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        // Accept either the wrapped { app, version, data } shape this app
+        // exports, or a raw state object (for resilience/manual editing).
+        const incoming = parsed && parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
+        if (!incoming || typeof incoming !== "object" || !Array.isArray(incoming.baskets)) {
+          reject(new Error("Invalid backup file"));
+          return;
+        }
+        setData({ ...DEFAULT_DATA, ...incoming, settings: { ...DEFAULT_DATA.settings, ...(incoming.settings || {}) } });
+        resolve();
+      } catch (e) { reject(e); }
+    };
+    reader.readAsText(file);
+  });
 
   if (!loaded) return <div className="min-h-screen flex items-center justify-center" style={{ background: PALETTE.bg, color: PALETTE.inkDim }}>Loading…</div>;
 
@@ -1243,7 +1293,7 @@ export default function WealthDashboard() {
       `}</style>
       <Sidebar view={view} setView={setView} lang={lang} />
       <div className="flex-1 flex flex-col pb-16 md:pb-0">
-        <Header lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} onExport={exportCSV} view={view} rate={rate} liveRate={liveRate} onRefreshRate={refreshLiveRate} />
+        <Header lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} view={view} rate={rate} liveRate={liveRate} onRefreshRate={refreshLiveRate} />
         <main className="flex-1 px-5 md:px-8 py-6">
           {view === "dashboard" && <DashboardView data={data} lang={lang} currency={currency} rate={rate} openTxModal={() => setModal({ kind: "tx" })} />}
           {view === "portfolio" && (
@@ -1276,7 +1326,7 @@ export default function WealthDashboard() {
           {view === "activity" && <ActivityView data={data} lang={lang} currency={currency} rate={rate}
             openEditActivity={(a) => setModal({ kind: "tx", payload: { targetId: a.targetId, targetType: a.targetType }, editing: a })}
             deleteActivity={deleteActivity} />}
-          {view === "settings" && <SettingsView data={data} setData={setData} lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} openRecurringModal={() => setModal({ kind: "recurring" })} logRecurring={logRecurring} />}
+          {view === "settings" && <SettingsView data={data} setData={setData} lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} openRecurringModal={() => setModal({ kind: "recurring" })} logRecurring={logRecurring} onExportBackup={exportBackup} onImportBackup={importBackup} />}
         </main>
       </div>
       <MobileNav view={view} setView={setView} lang={lang} />
