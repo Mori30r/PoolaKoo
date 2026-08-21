@@ -146,6 +146,12 @@ const nowISO = () => new Date().toISOString();
 function fmtUSD(n) { const v = Number(n) || 0; return "$" + v.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 }); }
 function fmtIRT(n, rate) { const v = (Number(n) || 0) * (rate || 0); return Math.round(v).toLocaleString("en-US") + " تومان"; }
 function fmtMoney(n, currency, rate) { return currency === "USD" ? fmtUSD(n) : fmtIRT(n, rate); }
+// Formats a number that is ALREADY denominated in `curr` — no rate math.
+// Used to display an activity's frozen, originally-entered value.
+function fmtExact(n, curr) {
+  const v = Number(n) || 0;
+  return curr === "USD" ? fmtUSD(v) : Math.round(v).toLocaleString("en-US") + " تومان";
+}
 function pct(n) { const v = Number(n) || 0; const sign = v > 0 ? "+" : ""; return sign + v.toFixed(2) + "%"; }
 function downloadCSV(rows, filename) {
   const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -231,19 +237,25 @@ const inputStyle = { background: PALETTE.bgSoft, border: `1px solid ${PALETTE.pa
 function TInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
 function TSelect(props) { return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
 
-function AmountField({ label, usdValue, onChange, rate, lang }) {
-  const [currency, setCurrency] = useState("USD");
-  const [raw, setRaw] = useState(usdValue ? String(usdValue) : "");
+function AmountField({ label, usdValue, initialEntered, initialCurrency, onChange, rate, lang }) {
+  const [currency, setCurrency] = useState(initialCurrency || "USD");
+  const [raw, setRaw] = useState(initialEntered != null ? String(initialEntered) : (usdValue ? String(usdValue) : ""));
+  const emit = (rawStr, curr) => {
+    const numeric = Number(rawStr) || 0;
+    const usd = curr === "USD" ? numeric : numeric / (rate || 1);
+    onChange({ usd, entered: numeric, currency: curr });
+  };
   const switchCurrency = (next) => {
     if (next === currency) return;
     const numeric = Number(raw) || 0;
     const newRaw = next === "IRT" ? Math.round(numeric * (rate || 1)) : (numeric / (rate || 1));
-    setRaw(newRaw ? String(newRaw) : ""); setCurrency(next);
+    const newRawStr = newRaw ? String(newRaw) : "";
+    setRaw(newRawStr); setCurrency(next);
+    emit(newRawStr, next);
   };
   const handleChange = (v) => {
     setRaw(v);
-    const numeric = Number(v) || 0;
-    onChange(currency === "USD" ? numeric : numeric / (rate || 1));
+    emit(v, currency);
   };
   return (
     <Field label={label}>
@@ -753,6 +765,12 @@ function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
   const Icon = catMeta ? catMeta.icon : (a.type === "deposit" ? Plus : a.type === "withdraw" ? Minus : a.type === "transfer" ? ArrowLeftRight : Sparkles);
   const color = catMeta ? catMeta.color : (Number(a.amount) >= 0 ? PALETTE.teal : PALETTE.coral);
   const positive = Number(a.amount) >= 0;
+  // Show the exact figure as originally entered when possible — it should
+  // never drift as the USDT rate changes. Only converts live if the person
+  // is viewing in a currency different from the one this was recorded in.
+  const dCurrency = a.displayCurrency || "USD";
+  const dAmount = a.displayAmount != null ? a.displayAmount : a.amount;
+  const amountText = dCurrency === currency ? fmtExact(dAmount, currency) : fmtMoney(a.amount, currency, rate);
   return (
     <div className="flex items-center justify-between gap-3 p-4">
       <div className="flex items-center gap-3">
@@ -767,7 +785,7 @@ function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
       </div>
       <div className="flex items-center gap-2">
         <div className="text-right">
-          <div className="text-sm font-semibold" style={{ color: positive ? PALETTE.teal : PALETTE.coral }}>{positive ? "+" : ""}{fmtMoney(a.amount, currency, rate)}</div>
+          <div className="text-sm font-semibold" style={{ color: positive ? PALETTE.teal : PALETTE.coral }}>{positive ? "+" : ""}{amountText}</div>
           <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{pct(a.pctOfTotal)} {t("relativeToTotal", lang)}</div>
         </div>
         <div className="flex flex-col gap-1">
@@ -940,7 +958,7 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
               return (
                 <div key={r.id} className="flex items-center justify-between text-sm">
                   <span style={{ color: PALETTE.ink }}>{r.label} → {target?.name}</span>
-                  <div className="flex items-center gap-2"><span style={{ color: PALETTE.teal }}>{fmtUSD(r.amount)}</span><Button variant="ghost" className="!py-1 !px-2 text-[11px]" onClick={() => logRecurring(r)}>{t("logThisMonth", lang)}</Button></div>
+                  <div className="flex items-center gap-2"><span style={{ color: PALETTE.teal }}>{r.amountMeta ? fmtExact(r.amountMeta.entered, r.amountMeta.currency) : fmtUSD(r.amount || 0)}</span><Button variant="ghost" className="!py-1 !px-2 text-[11px]" onClick={() => logRecurring(r)}>{t("logThisMonth", lang)}</Button></div>
                 </div>
               );
             })}
@@ -962,7 +980,7 @@ function BasketModal({ initial, defaultCategory, rate, onSave, onClose, lang }) 
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <Field label={t("category", lang)}><TSelect value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{catLabel(c, lang)}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v })} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v.usd })} rate={rate} lang={lang} />
         {isWallet && (
           <>
             <Field label={t("walletAddress", lang)}><TInput value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="0x… / bc1…" /></Field>
@@ -981,7 +999,7 @@ function DefiModal({ initial, wallets, rate, onSave, onClose, lang }) {
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aave USDC lending" /></Field>
         <Field label={t("connectedWallet", lang)}><TSelect value={form.walletId} onChange={e => setForm({ ...form, walletId: e.target.value })}>{wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v })} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v.usd })} rate={rate} lang={lang} />
         <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ ...form, apy: Number(form.apy) || 0 })} disabled={!form.walletId || !form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
@@ -994,7 +1012,7 @@ function LoanModal({ initial, rate, onSave, onClose, lang }) {
     <Modal title={initial ? t("edit", lang) : t("addLoan", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-        <AmountField label={t("principal", lang)} usdValue={form.principal} onChange={v => setForm({ ...form, principal: v })} rate={rate} lang={lang} />
+        <AmountField label={t("principal", lang)} usdValue={form.principal} onChange={v => setForm({ ...form, principal: v.usd })} rate={rate} lang={lang} />
         <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
         <Field label={t("months", lang)}><TInput type="number" value={form.months} onChange={e => setForm({ ...form, months: e.target.value })} placeholder="12" /></Field>
         <Field label={t("dueDay", lang)}><TInput type="number" min={1} max={28} value={form.dueDay} onChange={e => setForm({ ...form, dueDay: e.target.value })} placeholder="1" /></Field>
@@ -1005,13 +1023,13 @@ function LoanModal({ initial, rate, onSave, onClose, lang }) {
 }
 function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
   const suggested = loanMonthlyPayment(loan.principal, loan.apy, loan.months);
-  const [amount, setAmount] = useState(suggested);
+  const [amountMeta, setAmountMeta] = useState({ usd: suggested, entered: suggested, currency: "USD" });
   const [basketId, setBasketId] = useState("");
   const [note, setNote] = useState("");
   return (
     <Modal title={`${t("logPayment", lang)} · ${loan.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} onChange={setAmountMeta} rate={rate} lang={lang} />
         <Field label={t("payFrom", lang)}>
           <TSelect value={basketId} onChange={e => setBasketId(e.target.value)}>
             <option value="">{t("noAccount", lang)}</option>
@@ -1019,7 +1037,7 @@ function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
           </TSelect>
         </Field>
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amount, basketId: basketId || null, note })} disabled={!amount}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.usd}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1030,20 +1048,20 @@ function GoalModal({ initial, rate, onSave, onClose, lang }) {
     <Modal title={initial ? t("edit", lang) : t("addGoal", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-        <AmountField label={t("targetAmount", lang)} usdValue={form.targetAmount} onChange={v => setForm({ ...form, targetAmount: v })} rate={rate} lang={lang} />
-        <AmountField label={t("currentAmount", lang)} usdValue={form.currentAmount} onChange={v => setForm({ ...form, currentAmount: v })} rate={rate} lang={lang} />
+        <AmountField label={t("targetAmount", lang)} usdValue={form.targetAmount} onChange={v => setForm({ ...form, targetAmount: v.usd })} rate={rate} lang={lang} />
+        <AmountField label={t("currentAmount", lang)} usdValue={form.currentAmount} onChange={v => setForm({ ...form, currentAmount: v.usd })} rate={rate} lang={lang} />
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)} disabled={!form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
 }
 function GoalTxModal({ goal, type, rate, onSave, onClose, lang }) {
-  const [amount, setAmount] = useState(0);
+  const [amountMeta, setAmountMeta] = useState({ usd: 0, entered: 0, currency: "USD" });
   return (
     <Modal title={`${t(type, lang)} · ${goal.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(amount)} disabled={!amount}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} onChange={setAmountMeta} rate={rate} lang={lang} />
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(amountMeta)} disabled={!amountMeta.usd}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1055,7 +1073,9 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
     return first ? `${first.type}:${first.id}` : "";
   });
   const [type, setType] = useState(initialType || "deposit");
-  const [amount, setAmount] = useState(editing ? Math.abs(editing.amount) : 0);
+  const [amountMeta, setAmountMeta] = useState(() => editing
+    ? { usd: Math.abs(editing.amount), entered: Math.abs(editing.displayAmount ?? editing.amount), currency: editing.displayCurrency || "USD" }
+    : { usd: 0, entered: 0, currency: "USD" });
   const [note, setNote] = useState(editing?.note || "");
   const [txCategory, setTxCategory] = useState(editing?.txCategory || null);
   const [targetType, targetId] = targetKey ? targetKey.split(":") : [null, null];
@@ -1074,12 +1094,12 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
             ))}
           </div>
         </Field>
-        <AmountField label={t("amount", lang)} usdValue={amount} onChange={setAmount} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} initialEntered={editing ? Math.abs(editing.displayAmount ?? editing.amount) : undefined} initialCurrency={editing?.displayCurrency} onChange={setAmountMeta} rate={rate} lang={lang} />
         {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} />}
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
         {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtUSD(target.balance)}</div>}
         <div className="flex gap-2 mt-2">
-          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amount, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amount}>{t("save", lang)}</Button>
+          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amountMeta, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amountMeta.usd}>{t("save", lang)}</Button>
           <Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button>
         </div>
       </div>
@@ -1088,13 +1108,13 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
 }
 function RecurringModal({ data, rate, onSave, onClose, lang }) {
   const targets = useMemo(() => allTargets(data), [data]);
-  const [form, setForm] = useState({ label: "", targetId: targets[0]?.id || "", amount: 0 });
+  const [form, setForm] = useState({ label: "", targetId: targets[0]?.id || "", amountMeta: { usd: 0, entered: 0, currency: "USD" } });
   return (
     <Modal title={t("addRecurring", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} /></Field>
         <Field label={t("selectBasket", lang)}><TSelect value={form.targetId} onChange={e => setForm({ ...form, targetId: e.target.value })}>{targets.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.amount} onChange={v => setForm({ ...form, amount: v })} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} usdValue={form.amountMeta.usd} onChange={v => setForm({ ...form, amountMeta: v })} rate={rate} lang={lang} />
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
@@ -1171,15 +1191,17 @@ export default function WealthDashboard() {
     setModal(null);
   };
   const deleteLoan = (id) => setData(d => ({ ...d, loans: d.loans.filter(l => l.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
-  const logLoanPayment = (loan, { amount, basketId, note }) => {
+  const logLoanPayment = (loan, { amountMeta, basketId, note }) => {
     setData(d => {
-      const loans = d.loans.map(l => l.id === loan.id ? { ...l, amountPaid: (Number(l.amountPaid) || 0) + amount, payments: [...(l.payments || []), { id: uid(), date: nowISO(), amount }] } : l);
-      const baskets = basketId ? d.baskets.map(b => b.id === basketId ? { ...b, balance: (Number(b.balance) || 0) - amount } : b) : d.baskets;
+      const loans = d.loans.map(l => l.id === loan.id ? { ...l, amountPaid: (Number(l.amountPaid) || 0) + amountMeta.usd, payments: [...(l.payments || []), { id: uid(), date: nowISO(), amount: amountMeta.usd }] } : l);
+      const baskets = basketId ? d.baskets.map(b => b.id === basketId ? { ...b, balance: (Number(b.balance) || 0) - amountMeta.usd } : b) : d.baskets;
       const activity = {
         id: uid(), date: nowISO(), type: "withdraw",
         targetId: basketId || loan.id, targetType: basketId ? "basket" : "loan",
         category: basketId ? (d.baskets.find(b => b.id === basketId)?.category || "loan") : "loan",
-        amount: -Math.abs(amount), note: note || `${t("logPayment", lang)}: ${loan.name}`,
+        amount: -Math.abs(amountMeta.usd),
+        displayAmount: -Math.abs(amountMeta.entered), displayCurrency: amountMeta.currency,
+        note: note || `${t("logPayment", lang)}: ${loan.name}`,
         txCategory: "loan", pctOfTotal: 0,
       };
       return { ...d, loans, baskets, activities: [...d.activities, activity] };
@@ -1198,11 +1220,12 @@ export default function WealthDashboard() {
     setModal(null);
   };
   const deleteGoal = (id) => setData(d => ({ ...d, goals: d.goals.filter(g => g.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
-  const goalTx = (goal, type, amount) => {
+  const goalTx = (goal, type, amountMeta) => {
     setData(d => {
-      const signed = type === "withdraw" ? -Math.abs(amount) : Math.abs(amount);
-      const goals = d.goals.map(g => g.id === goal.id ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) + signed, 0) } : g);
-      const activity = { id: uid(), date: nowISO(), type, targetId: goal.id, targetType: "goal", category: "goal", amount: signed, note: goal.name, txCategory: null, pctOfTotal: 0 };
+      const signedUsd = type === "withdraw" ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
+      const signedDisplay = type === "withdraw" ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
+      const goals = d.goals.map(g => g.id === goal.id ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) + signedUsd, 0) } : g);
+      const activity = { id: uid(), date: nowISO(), type, targetId: goal.id, targetType: "goal", category: "goal", amount: signedUsd, displayAmount: signedDisplay, displayCurrency: amountMeta.currency, note: goal.name, txCategory: null, pctOfTotal: 0 };
       return { ...d, goals, activities: [...d.activities, activity] };
     });
     setModal(null);
@@ -1214,20 +1237,26 @@ export default function WealthDashboard() {
     if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
     return d;
   };
-  const saveTx = ({ id, targetId, targetType, type, amount, note, txCategory }) => {
+  const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory }) => {
     setData(d => {
-      const signedAmount = (type === "withdraw") ? -Math.abs(amount) : Math.abs(amount);
+      const signedUsd = (type === "withdraw") ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
+      const signedDisplay = (type === "withdraw") ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
       let next = d;
       if (id) {
         // Editing: revert the old amount's effect, then apply the new one.
         const old = d.activities.find(a => a.id === id);
         if (old) next = applyTargetDelta(next, old.targetType, old.targetId, -old.amount);
       }
-      next = applyTargetDelta(next, targetType, targetId, signedAmount);
+      next = applyTargetDelta(next, targetType, targetId, signedUsd);
       const prevTotal = totalNetWorth(next);
-      const pctOfTotal = prevTotal !== 0 ? (signedAmount / Math.abs(prevTotal)) * 100 : (signedAmount !== 0 ? 100 : 0);
+      const pctOfTotal = prevTotal !== 0 ? (signedUsd / Math.abs(prevTotal)) * 100 : (signedUsd !== 0 ? 100 : 0);
       const category = targetType === "defi" ? "defi" : next.baskets.find(b => b.id === targetId)?.category;
-      const activity = { id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(), type, targetId, targetType, category, amount: signedAmount, note, txCategory, pctOfTotal };
+      const activity = {
+        id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(),
+        type, targetId, targetType, category, amount: signedUsd,
+        displayAmount: signedDisplay, displayCurrency: amountMeta.currency,
+        note, txCategory, pctOfTotal,
+      };
       const activities = id ? next.activities.map(a => a.id === id ? activity : a) : [...next.activities, activity];
       return { ...next, activities };
     });
@@ -1251,7 +1280,8 @@ export default function WealthDashboard() {
     const targets = allTargets(data);
     const target = targets.find(x => x.id === r.targetId);
     if (!target) return;
-    saveTx({ targetId: r.targetId, targetType: target.type, type: "interest", amount: r.amount, note: r.label, txCategory: null });
+    const amountMeta = r.amountMeta || { usd: Number(r.amount) || 0, entered: Number(r.amount) || 0, currency: "USD" };
+    saveTx({ targetId: r.targetId, targetType: target.type, type: "interest", amountMeta, note: r.label, txCategory: null });
   };
 
   /* ---------------- full backup export / import ---------------- */
