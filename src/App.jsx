@@ -12,9 +12,20 @@ import {
 } from "recharts";
 
 /* ============================================================================
-   WEALTH & CRYPTO DASHBOARD
+   POOLAKOO — Wealth & Crypto Dashboard
    Local-first personal finance tracker. All data persists in the browser
-   (localStorage). Every manual amount field accepts USD or Toman.
+   (localStorage).
+
+   CURRENCY MODEL — read this before touching money math:
+   Every basket, DeFi position, loan, and goal has a `nativeCurrency`
+   ("USD" | "IRT") chosen when it's created, and its balance/principal/target
+   numbers are stored EXACTLY as entered, in that currency — never silently
+   normalized to USD. Viewing an item in its own native currency always
+   shows the exact frozen number, unaffected by later USDT/IRT rate changes.
+   Only when you view something in the OTHER currency (or in an aggregate
+   total spanning multiple accounts) does a live-rate conversion happen —
+   that's unavoidable and expected, since a true multi-currency total has to
+   use *some* rate. Individual accounts/records never drift; totals do.
    ============================================================================ */
 
 /* --------------------------- Design tokens ------------------------------- */
@@ -24,7 +35,6 @@ const PALETTE = {
   coral: "#E8735C", violet: "#8B7FE8",
 };
 
-// Selectable basket categories (account types).
 const CATEGORY_META = {
   bank:        { label: { en: "Bank Accounts",        fa: "حساب‌های بانکی" }, icon: Landmark,   color: "#5B9DE8" },
   project:     { label: { en: "Project Expenses",      fa: "هزینه‌های پروژه" }, icon: Briefcase,  color: PALETTE.violet },
@@ -45,7 +55,6 @@ function categoryMeta(cat) {
   return CATEGORY_META[cat];
 }
 
-// Spending/income categories for the ledger — separate from account type.
 const TX_CATEGORIES = {
   groceries:  { label: { en: "Groceries", fa: "خواربار" }, icon: ShoppingCart, color: "#5CE8A0" },
   restaurant: { label: { en: "Restaurant", fa: "رستوران" }, icon: UtensilsCrossed, color: "#E8B15C" },
@@ -81,8 +90,7 @@ const STR = {
     dashboard: { en: "Dashboard", fa: "داشبورد" }, portfolio: { en: "Portfolio", fa: "پرتفوی" },
     wallets: { en: "Wallets", fa: "کیف‌پول‌ها" }, defi: { en: "DeFi", fa: "دیفای" },
     loans: { en: "Loans", fa: "وام‌ها" }, goals: { en: "Goals", fa: "اهداف" },
-    activity: { en: "Activity", fa: "فعالیت‌ها" },
-    settings: { en: "Settings", fa: "تنظیمات" },
+    activity: { en: "Activity", fa: "فعالیت‌ها" }, settings: { en: "Settings", fa: "تنظیمات" },
   },
   totalNetWorth: { en: "Total Net Worth", fa: "ارزش خالص کل" },
   addBasket: { en: "New Basket", fa: "بسکت جدید" },
@@ -103,15 +111,7 @@ const STR = {
   rateUnavailable: { en: "Rate unavailable — tap to retry", fa: "نرخ در دسترس نیست — برای تلاش دوباره ضربه بزنید" },
   language: { en: "Language", fa: "زبان" }, currency: { en: "Currency", fa: "واحد پول" },
   emptyBaskets: { en: "No baskets yet — create your first one.", fa: "هنوز بسکتی نساخته‌اید." },
-  recurring: { en: "Recurring Monthly Income", fa: "درآمد ماهانه ثابت" }, addRecurring: { en: "Add Recurring", fa: "افزودن مورد ثابت" },
-  backupRestore: { en: "Backup & Restore", fa: "پشتیبان‌گیری و بازیابی" },
-  exportBackup: { en: "Export Backup", fa: "خروجی پشتیبان" },
-  importBackup: { en: "Import Backup", fa: "وارد کردن پشتیبان" },
-  backupHint: { en: "Export saves everything on this device to a file. Import replaces all current data with that file's contents.", fa: "خروجی، همه اطلاعات این دستگاه را در یک فایل ذخیره می‌کند. وارد کردن، تمام داده‌های فعلی را با محتوای آن فایل جایگزین می‌کند." },
-  importConfirm: { en: "This will replace all current data with the backup file. Continue?", fa: "این کار تمام داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟" },
-  importSuccess: { en: "Backup imported successfully.", fa: "پشتیبان با موفقیت وارد شد." },
-  importError: { en: "Could not read that file — make sure it's a backup exported from this app.", fa: "این فایل قابل خواندن نیست — مطمئن شوید فایل پشتیبان همین برنامه است." },
-  logThisMonth: { en: "Log this month", fa: "ثبت این ماه" }, selectBasket: { en: "Target", fa: "مقصد" },
+  selectBasket: { en: "Target", fa: "مقصد" },
   relativeToTotal: { en: "of net worth", fa: "از ارزش کل" },
   connectAddressHint: {
     en: "Paste an EVM/BTC/Solana address to label a wallet. Balances are entered manually — use the Deposit/Withdraw buttons to keep them current.",
@@ -136,6 +136,15 @@ const STR = {
   contribute: { en: "Contribute", fa: "افزودن" }, listView: { en: "List", fa: "فهرست" }, breakdownView: { en: "Breakdown", fa: "تفکیک" },
   income: { en: "Income", fa: "درآمد" }, expenses: { en: "Expenses", fa: "هزینه‌ها" },
   target: { en: "Target", fa: "مقصد" }, editActivity: { en: "Edit Activity", fa: "ویرایش فعالیت" },
+  backupRestore: { en: "Backup & Restore", fa: "پشتیبان‌گیری و بازیابی" },
+  exportBackup: { en: "Export Backup", fa: "خروجی پشتیبان" },
+  importBackup: { en: "Import Backup", fa: "وارد کردن پشتیبان" },
+  backupHint: { en: "Export saves everything on this device to a file. Import replaces all current data with that file's contents.", fa: "خروجی، همه اطلاعات این دستگاه را در یک فایل ذخیره می‌کند. وارد کردن، تمام داده‌های فعلی را با محتوای آن فایل جایگزین می‌کند." },
+  importConfirm: { en: "This will replace all current data with the backup file. Continue?", fa: "این کار تمام داده‌های فعلی را با فایل پشتیبان جایگزین می‌کند. ادامه می‌دهید؟" },
+  importSuccess: { en: "Backup imported successfully.", fa: "پشتیبان با موفقیت وارد شد." },
+  importError: { en: "Could not read that file — make sure it's a backup exported from this app.", fa: "این فایل قابل خواندن نیست — مطمئن شوید فایل پشتیبان همین برنامه است." },
+  nativeCurrencyNote: { en: "This account is tracked in its own currency and won't drift when the USDT rate changes.", fa: "این حساب با واحد پول خودش ثبت می‌شود و با تغییر نرخ تتر تغییر نمی‌کند." },
+  notEditable: { en: "Editing isn't available for this entry — delete and re-add if needed.", fa: "این مورد قابل ویرایش نیست — در صورت نیاز حذف و دوباره ثبت کنید." },
 };
 function t(key, lang) { const e = STR[key]; if (!e) return key; return e[lang] || e.en; }
 function catLabel(cat, lang) { return categoryMeta(cat)?.label[lang] || cat; }
@@ -147,26 +156,19 @@ function fmtUSD(n) { const v = Number(n) || 0; return "$" + v.toLocaleString("en
 function fmtIRT(n, rate) { const v = (Number(n) || 0) * (rate || 0); return Math.round(v).toLocaleString("en-US") + " تومان"; }
 function fmtMoney(n, currency, rate) { return currency === "USD" ? fmtUSD(n) : fmtIRT(n, rate); }
 // Formats a number that is ALREADY denominated in `curr` — no rate math.
-// Used to display an activity's frozen, originally-entered value.
 function fmtExact(n, curr) {
   const v = Number(n) || 0;
   return curr === "USD" ? fmtUSD(v) : Math.round(v).toLocaleString("en-US") + " تومان";
 }
 function pct(n) { const v = Number(n) || 0; const sign = v > 0 ? "+" : ""; return sign + v.toFixed(2) + "%"; }
-function downloadCSV(rows, filename) {
-  const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
 function downloadJSON(obj, filename) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-// Standard loan amortization formula.
+// Standard loan amortization formula. Pure math — no currency conversion
+// involved, so it operates directly in whatever currency `principal` is.
 function loanMonthlyPayment(principal, apy, months) {
   const r = (Number(apy) || 0) / 100 / 12;
   const n = Math.max(Number(months) || 1, 1);
@@ -182,10 +184,34 @@ function loanNextDueDate(loan) {
   return due;
 }
 
+/* ------------------- Currency conversion helpers (native model) ----------- */
+// Converts an unsigned magnitude from `amountMeta` (as typed, in its own
+// currency) into `targetCurrency` terms — exact if currencies match, else
+// uses the current rate. This is what gets added/subtracted to an account's
+// own native-currency balance, so once applied it never needs recomputing.
+function amountInCurrency(amountMeta, targetCurrency, rate) {
+  if (amountMeta.currency === targetCurrency) return amountMeta.entered;
+  if (targetCurrency === "USD") return amountMeta.usd;
+  return amountMeta.usd * (rate || 1);
+}
+function toUSDValue(amount, nativeCurrency, rate) {
+  const v = Number(amount) || 0;
+  return nativeCurrency === "USD" ? v : v / (rate || 1);
+}
+// Displays a native-currency amount: exact/frozen if the account's own
+// currency matches what's currently selected app-wide, otherwise a live
+// conversion (unavoidable when crossing currencies).
+function displayNative(amount, nativeCurrency, displayCurrency, rate) {
+  const nc = nativeCurrency || "USD";
+  if (nc === displayCurrency) return fmtExact(amount, displayCurrency);
+  const usd = toUSDValue(amount, nc, rate);
+  return fmtMoney(usd, displayCurrency, rate);
+}
+
 /* ------------------------------ Storage hook ------------------------------ */
-const STORE_KEY = "wealth-dashboard-v3";
+const STORE_KEY = "wealth-dashboard-v4";
 const DEFAULT_DATA = {
-  baskets: [], defiPositions: [], loans: [], goals: [], activities: [], recurring: [],
+  baskets: [], defiPositions: [], loans: [], goals: [], activities: [],
   settings: { lang: "en", currency: "USD", usdtToIrt: 950000 },
 };
 function useWealthStore() {
@@ -237,9 +263,42 @@ const inputStyle = { background: PALETTE.bgSoft, border: `1px solid ${PALETTE.pa
 function TInput(props) { return <input {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
 function TSelect(props) { return <select {...props} style={{ ...inputStyle, ...(props.style || {}) }} className={`w-full ${props.className || ""}`} />; }
 
-function AmountField({ label, usdValue, initialEntered, initialCurrency, onChange, rate, lang }) {
+/* ---- Comma-formatted numeric input (thousands separators as you type) ---- */
+function formatNumberDisplay(raw) {
+  if (raw === "" || raw == null) return "";
+  const neg = String(raw).startsWith("-");
+  let s = neg ? String(raw).slice(1) : String(raw);
+  const [intPart, decPart] = s.split(".");
+  const withCommas = (intPart || "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (neg ? "-" : "") + withCommas + (decPart !== undefined ? "." + decPart : "");
+}
+function cleanNumberInput(display) {
+  let v = String(display).replace(/,/g, "");
+  v = v.replace(/[^0-9.\-]/g, "");
+  v = v[0] === "-" ? "-" + v.slice(1).replace(/-/g, "") : v.replace(/-/g, "");
+  const parts = v.split(".");
+  if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+  return v;
+}
+function NumberInput({ value, onChange, placeholder, className = "", style, min, max }) {
+  return (
+    <input
+      type="text" inputMode="decimal"
+      value={formatNumberDisplay(value)}
+      onChange={e => onChange(cleanNumberInput(e.target.value))}
+      placeholder={placeholder}
+      style={{ ...inputStyle, ...(style || {}) }}
+      className={`w-full ${className}`}
+    />
+  );
+}
+
+// Amount input with an inline USD/IRT toggle. Always emits the FULL entered
+// figure back — { usd, entered, currency } — so callers can store either the
+// exact typed value (native-currency fields) or its USD equivalent, as needed.
+function AmountField({ label, initialEntered, initialCurrency = "USD", onChange, rate, lang }) {
   const [currency, setCurrency] = useState(initialCurrency || "USD");
-  const [raw, setRaw] = useState(initialEntered != null ? String(initialEntered) : (usdValue ? String(usdValue) : ""));
+  const [raw, setRaw] = useState(initialEntered != null && initialEntered !== 0 ? String(initialEntered) : "");
   const emit = (rawStr, curr) => {
     const numeric = Number(rawStr) || 0;
     const usd = curr === "USD" ? numeric : numeric / (rate || 1);
@@ -253,14 +312,11 @@ function AmountField({ label, usdValue, initialEntered, initialCurrency, onChang
     setRaw(newRawStr); setCurrency(next);
     emit(newRawStr, next);
   };
-  const handleChange = (v) => {
-    setRaw(v);
-    emit(v, currency);
-  };
+  const handleChange = (v) => { setRaw(v); emit(v, currency); };
   return (
     <Field label={label}>
       <div className="flex gap-2">
-        <TInput type="number" value={raw} onChange={e => handleChange(e.target.value)} className="flex-1" />
+        <NumberInput value={raw} onChange={handleChange} className="flex-1" />
         <div className="flex rounded-lg overflow-hidden shrink-0" style={{ border: `1px solid ${PALETTE.panelBorder}` }}>
           {["USD", "IRT"].map(c => (
             <button key={c} type="button" onClick={() => switchCurrency(c)} className="px-2.5 text-xs font-medium"
@@ -272,7 +328,6 @@ function AmountField({ label, usdValue, initialEntered, initialCurrency, onChang
   );
 }
 
-// Icon-grid picker for the 8 spending categories.
 function CategoryPicker({ value, onChange, lang }) {
   return (
     <Field label={t("spendingCategory", lang)}>
@@ -284,8 +339,7 @@ function CategoryPicker({ value, onChange, lang }) {
             <button key={key} type="button" onClick={() => onChange(active ? null : key)}
               className="flex flex-col items-center gap-1 rounded-xl py-2 text-[10px]"
               style={{ background: active ? `${meta.color}22` : PALETTE.bgSoft, border: `1px solid ${active ? meta.color : PALETTE.panelBorder}`, color: active ? meta.color : PALETTE.inkDim }}>
-              <Icon size={16} />
-              {meta.label[lang]}
+              <Icon size={16} />{meta.label[lang]}
             </button>
           );
         })}
@@ -343,19 +397,24 @@ function CircularProgress({ percent, size = 96, stroke = 10, color = PALETTE.tea
 /* ============================================================================
    DERIVED DATA HELPERS
    ============================================================================ */
-function basketsTotal(baskets) { return baskets.reduce((s, b) => s + (Number(b.balance) || 0), 0); }
-function defiTotal(defiPositions) { return defiPositions.reduce((s, p) => s + (Number(p.balance) || 0), 0); }
-function totalNetWorth(data) { return basketsTotal(data.baskets) + defiTotal(data.defiPositions); }
+function basketsTotal(baskets, rate) { return baskets.reduce((s, b) => s + toUSDValue(b.balance, b.nativeCurrency || "USD", rate), 0); }
+function defiTotal(defiPositions, rate) { return defiPositions.reduce((s, p) => s + toUSDValue(p.balance, p.nativeCurrency || "USD", rate), 0); }
+function totalNetWorth(data, rate) { return basketsTotal(data.baskets, rate) + defiTotal(data.defiPositions, rate); }
 
-function computeHistory(data) {
+function computeHistory(data, rate) {
   const events = [];
-  data.baskets.forEach(b => events.push({ date: b.createdAt, amount: Number(b.initialBalance) || 0 }));
-  data.defiPositions.forEach(p => events.push({ date: p.createdAt, amount: Number(p.initialBalance) || 0 }));
+  data.baskets.forEach(b => events.push({ date: b.createdAt, amount: toUSDValue(b.initialBalance, b.nativeCurrency || "USD", rate) }));
+  data.defiPositions.forEach(p => events.push({ date: p.createdAt, amount: toUSDValue(p.initialBalance, p.nativeCurrency || "USD", rate) }));
   data.activities.forEach(a => { if (a.targetType === "basket" || a.targetType === "defi") events.push({ date: a.date, amount: Number(a.amount) || 0 }); });
   events.sort((a, b) => new Date(a.date) - new Date(b.date));
   let running = 0;
   const series = events.map(e => { running += e.amount; return { date: e.date, value: running }; });
   if (series.length === 0) series.push({ date: nowISO(), value: 0 });
+  // Anchor the most recent point to the real current total (computed
+  // directly from live balances) so the chart never disagrees with the
+  // headline Net Worth figure, even if the replayed shape above is only
+  // an approximation of the true historical path.
+  series[series.length - 1] = { ...series[series.length - 1], value: totalNetWorth(data, rate) };
   return series;
 }
 function filterSeries(series, range) {
@@ -365,14 +424,12 @@ function filterSeries(series, range) {
   const filtered = series.filter(p => new Date(p.date).getTime() >= cutoff);
   return filtered.length > 1 ? filtered : series.slice(-2);
 }
-// Baskets + DeFi — used where a ledger entry must move real balances.
 function allTargets(data) {
   return [
-    ...data.baskets.map(b => ({ id: b.id, name: b.name, type: "basket", category: b.category, balance: b.balance })),
-    ...data.defiPositions.map(p => ({ id: p.id, name: p.name, type: "defi", category: "defi", balance: p.balance })),
+    ...data.baskets.map(b => ({ id: b.id, name: b.name, type: "basket", category: b.category, balance: b.balance, nativeCurrency: b.nativeCurrency || "USD" })),
+    ...data.defiPositions.map(p => ({ id: p.id, name: p.name, type: "defi", category: "defi", balance: p.balance, nativeCurrency: p.nativeCurrency || "USD" })),
   ];
 }
-// Everything an activity could reference, including loans/goals, for lookups & filters.
 function allTargetsExtended(data) {
   return [
     ...allTargets(data),
@@ -451,8 +508,8 @@ function Header({ lang, setLang, currency, setCurrency, view, rate, liveRate, on
    ============================================================================ */
 function DashboardView({ data, lang, currency, rate, openTxModal }) {
   const [range, setRange] = useState("30d");
-  const net = totalNetWorth(data);
-  const history = useMemo(() => computeHistory(data), [data]);
+  const net = totalNetWorth(data, rate);
+  const history = useMemo(() => computeHistory(data, rate), [data, rate]);
   const shown = useMemo(() => filterSeries(history, range), [history, range]);
   const changePct = useMemo(() => {
     if (shown.length < 2) return 0;
@@ -461,13 +518,13 @@ function DashboardView({ data, lang, currency, rate, openTxModal }) {
   }, [shown]);
   const byCategory = useMemo(() => {
     const map = {};
-    data.baskets.forEach(b => { map[b.category] = (map[b.category] || 0) + (Number(b.balance) || 0); });
-    const defiSum = defiTotal(data.defiPositions);
+    data.baskets.forEach(b => { map[b.category] = (map[b.category] || 0) + toUSDValue(b.balance, b.nativeCurrency || "USD", rate); });
+    const defiSum = defiTotal(data.defiPositions, rate);
     if (defiSum) map.defi = defiSum;
     return Object.entries(map).filter(([, v]) => v !== 0).map(([cat, value]) => ({ cat, value, color: categoryMeta(cat)?.color || "#888" }));
-  }, [data.baskets, data.defiPositions]);
-  const defiMonthly = data.defiPositions.reduce((s, p) => s + (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12, 0);
-  const defiYearly = data.defiPositions.reduce((s, p) => s + (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100, 0);
+  }, [data.baskets, data.defiPositions, rate]);
+  const defiMonthlyUSD = data.defiPositions.reduce((s, p) => s + toUSDValue(p.balance, p.nativeCurrency || "USD", rate) * (Number(p.apy) || 0) / 100 / 12, 0);
+  const defiYearlyUSD = data.defiPositions.reduce((s, p) => s + toUSDValue(p.balance, p.nativeCurrency || "USD", rate) * (Number(p.apy) || 0) / 100, 0);
   const chartDate = d => new Date(d).toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US", { month: "short", day: "numeric" });
 
   return (
@@ -532,12 +589,12 @@ function DashboardView({ data, lang, currency, rate, openTxModal }) {
           {data.defiPositions.length === 0 ? <div className="text-sm py-10 text-center" style={{ color: PALETTE.inkDim }}>{t("emptyDefi", lang)}</div> : (
             <>
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("monthly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiMonthly, currency, rate)}</div></div>
-                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("yearly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiYearly, currency, rate)}</div></div>
+                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("monthly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiMonthlyUSD, currency, rate)}</div></div>
+                <div className="rounded-xl p-4" style={{ background: PALETTE.bgSoft }}><div className="text-xs mb-1" style={{ color: PALETTE.inkDim }}>{t("yearly", lang)}</div><div className="text-xl font-semibold" style={{ color: PALETTE.amber }}>{fmtMoney(defiYearlyUSD, currency, rate)}</div></div>
               </div>
               <div className="flex flex-col gap-2">
                 {data.defiPositions.map(p => (
-                  <div key={p.id} className="flex items-center justify-between text-xs"><span style={{ color: PALETTE.inkDim }}>{p.name}</span><span style={{ color: PALETTE.ink }}>{p.apy}% APY · {fmtMoney(p.balance, currency, rate)}</span></div>
+                  <div key={p.id} className="flex items-center justify-between text-xs"><span style={{ color: PALETTE.inkDim }}>{p.name}</span><span style={{ color: PALETTE.ink }}>{p.apy}% APY · {displayNative(p.balance, p.nativeCurrency, currency, rate)}</span></div>
                 ))}
               </div>
             </>
@@ -560,11 +617,11 @@ function BasketCard({ basket, lang, currency, rate, onEdit, onDelete, onQuickTx 
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <IconBadge Icon={Icon} color={meta.color} />
-          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{basket.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{catLabel(basket.category, lang)}</div></div>
+          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{basket.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{catLabel(basket.category, lang)} · {basket.nativeCurrency || "USD"}</div></div>
         </div>
         <div className="flex gap-1"><button onClick={() => onEdit(basket)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => onDelete(basket.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
       </div>
-      <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(basket.balance, currency, rate)}</div>
+      <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(basket.balance, basket.nativeCurrency, currency, rate)}</div>
       <div className="flex gap-2 mt-1">
         <Button variant="ghost" className="!py-1.5 !px-2.5 text-xs flex-1" onClick={() => onQuickTx(basket, "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
         <Button variant="ghost" className="!py-1.5 !px-2.5 text-xs flex-1" onClick={() => onQuickTx(basket, "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
@@ -612,11 +669,11 @@ function WalletsView({ data, lang, currency, rate, openBasketModal, deleteBasket
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <IconBadge Icon={meta.icon} color={meta.color} />
-                    <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{w.name}</div><div className="text-[11px] font-mono" style={{ color: PALETTE.inkDim }}>{w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)} · ` : ""}{chainLabel}</div></div>
+                    <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{w.name}</div><div className="text-[11px] font-mono" style={{ color: PALETTE.inkDim }}>{w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)} · ` : ""}{chainLabel} · {w.nativeCurrency || "USD"}</div></div>
                   </div>
                   <div className="flex gap-1"><button onClick={() => openBasketModal(w)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteBasket(w.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
                 </div>
-                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(w.balance, currency, rate)}</div>
+                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(w.balance, w.nativeCurrency, currency, rate)}</div>
                 <div className="flex gap-2">
                   <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(w, "basket", "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
                   <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(w, "basket", "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
@@ -643,15 +700,15 @@ function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openT
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {data.defiPositions.map(p => {
             const wallet = data.baskets.find(b => b.id === p.walletId);
-            const monthly = (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12;
+            const monthlyNative = (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12;
             return (
               <Card key={p.id} className="p-4 flex flex-col gap-3">
                 <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{p.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"}</div></div></div>
+                  <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{p.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"} · {p.nativeCurrency || "USD"}</div></div></div>
                   <div className="flex gap-1"><button onClick={() => openDefiModal(p)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteDefi(p.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
                 </div>
-                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(p.balance, currency, rate)}</div>
-                <div className="text-xs" style={{ color: PALETTE.amber }}>{p.apy}% APY · {fmtMoney(monthly, currency, rate)}/mo</div>
+                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(p.balance, p.nativeCurrency, currency, rate)}</div>
+                <div className="text-xs" style={{ color: PALETTE.amber }}>{p.apy}% APY · {displayNative(monthlyNative, p.nativeCurrency, currency, rate)}/mo</div>
                 <div className="flex gap-2">
                   <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
                   <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
@@ -669,6 +726,7 @@ function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openT
    LOANS VIEW
    ============================================================================ */
 function LoanCard({ loan, lang, currency, rate, onEdit, onDelete, onPay }) {
+  const nc = loan.nativeCurrency || "USD";
   const monthly = loanMonthlyPayment(loan.principal, loan.apy, loan.months);
   const totalOwed = monthly * loan.months;
   const paid = Number(loan.amountPaid) || 0;
@@ -683,7 +741,7 @@ function LoanCard({ loan, lang, currency, rate, onEdit, onDelete, onPay }) {
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <IconBadge Icon={LOAN_META.icon} color={LOAN_META.color} />
-          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{loan.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{loan.apy}% APY · {loan.months}mo</div></div>
+          <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{loan.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{loan.apy}% APY · {loan.months}mo · {nc}</div></div>
         </div>
         <div className="flex items-center gap-2">
           {paidOff && <span className="text-[10px] font-medium rounded-full px-2 py-0.5" style={{ background: `${PALETTE.teal}22`, color: PALETTE.teal }}>{t("paidOff", lang)}</span>}
@@ -692,8 +750,8 @@ function LoanCard({ loan, lang, currency, rate, onEdit, onDelete, onPay }) {
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 text-xs">
-        <div><div style={{ color: PALETTE.inkDim }}>{t("monthlyPayment", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(monthly, currency, rate)}</div></div>
-        <div><div style={{ color: PALETTE.inkDim }}>{t("remaining", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{fmtMoney(Math.max(totalOwed - paid, 0), currency, rate)}</div></div>
+        <div><div style={{ color: PALETTE.inkDim }}>{t("monthlyPayment", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{displayNative(monthly, nc, currency, rate)}</div></div>
+        <div><div style={{ color: PALETTE.inkDim }}>{t("remaining", lang)}</div><div className="text-base font-semibold" style={{ color: PALETTE.ink }}>{displayNative(Math.max(totalOwed - paid, 0), nc, currency, rate)}</div></div>
       </div>
       <div>
         <div className="flex justify-between text-[11px] mb-1" style={{ color: PALETTE.inkDim }}><span>{Math.round(percent)}% {t("paidSoFar", lang)}</span><span>{monthsPaidCount}/{loan.months} {t("monthsPaid", lang)}</span></div>
@@ -726,6 +784,7 @@ function LoansView({ data, lang, currency, rate, openLoanModal, deleteLoan, open
    GOALS VIEW
    ============================================================================ */
 function GoalCard({ goal, lang, currency, rate, onEdit, onDelete, onTx }) {
+  const nc = goal.nativeCurrency || "USD";
   const percent = goal.targetAmount > 0 ? (goal.currentAmount / goal.targetAmount) * 100 : 0;
   return (
     <Card className="p-4 flex flex-col items-center gap-3 text-center">
@@ -735,7 +794,7 @@ function GoalCard({ goal, lang, currency, rate, onEdit, onDelete, onTx }) {
       </div>
       <CircularProgress percent={percent} color={GOAL_META.color} />
       <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{goal.name}</div>
-        <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{fmtMoney(goal.currentAmount, currency, rate)} / {fmtMoney(goal.targetAmount, currency, rate)}</div>
+        <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{displayNative(goal.currentAmount, nc, currency, rate)} / {displayNative(goal.targetAmount, nc, currency, rate)}</div>
       </div>
       <div className="flex gap-2 w-full">
         <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => onTx(goal, "deposit")}><Plus size={13} />{t("contribute", lang)}</Button>
@@ -765,12 +824,10 @@ function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
   const Icon = catMeta ? catMeta.icon : (a.type === "deposit" ? Plus : a.type === "withdraw" ? Minus : a.type === "transfer" ? ArrowLeftRight : Sparkles);
   const color = catMeta ? catMeta.color : (Number(a.amount) >= 0 ? PALETTE.teal : PALETTE.coral);
   const positive = Number(a.amount) >= 0;
-  // Show the exact figure as originally entered when possible — it should
-  // never drift as the USDT rate changes. Only converts live if the person
-  // is viewing in a currency different from the one this was recorded in.
   const dCurrency = a.displayCurrency || "USD";
   const dAmount = a.displayAmount != null ? a.displayAmount : a.amount;
   const amountText = dCurrency === currency ? fmtExact(dAmount, currency) : fmtMoney(a.amount, currency, rate);
+  const editable = a.targetType === "basket" || a.targetType === "defi";
   return (
     <div className="flex items-center justify-between gap-3 p-4">
       <div className="flex items-center gap-3">
@@ -789,7 +846,7 @@ function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
           <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{pct(a.pctOfTotal)} {t("relativeToTotal", lang)}</div>
         </div>
         <div className="flex flex-col gap-1">
-          <button onClick={() => onEdit(a)} style={{ color: PALETTE.inkDim }}><Edit3 size={13} /></button>
+          {editable ? <button onClick={() => onEdit(a)} style={{ color: PALETTE.inkDim }}><Edit3 size={13} /></button> : <span style={{ width: 13 }} />}
           <button onClick={() => onDelete(a.id)} style={{ color: PALETTE.coral }}><Trash2 size={13} /></button>
         </div>
       </div>
@@ -902,22 +959,16 @@ function ActivityView({ data, lang, currency, rate, openEditActivity, deleteActi
 /* ============================================================================
    SETTINGS VIEW
    ============================================================================ */
-function SettingsView({ data, setData, lang, setLang, currency, setCurrency, openRecurringModal, logRecurring, onExportBackup, onImportBackup }) {
-  const targets = useMemo(() => allTargets(data), [data]);
+function SettingsView({ data, setData, lang, setLang, currency, setCurrency, onExportBackup, onImportBackup }) {
   const fileInputRef = useRef(null);
-  const [importMsg, setImportMsg] = useState(null); // { type: 'success'|'error', text }
+  const [importMsg, setImportMsg] = useState(null);
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file later
+    e.target.value = "";
     if (!file) return;
     if (!window.confirm(t("importConfirm", lang))) return;
-    try {
-      await onImportBackup(file);
-      setImportMsg({ type: "success", text: t("importSuccess", lang) });
-    } catch (err) {
-      console.error("Import failed", err);
-      setImportMsg({ type: "error", text: t("importError", lang) });
-    }
+    try { await onImportBackup(file); setImportMsg({ type: "success", text: t("importSuccess", lang) }); }
+    catch (err) { console.error("Import failed", err); setImportMsg({ type: "error", text: t("importError", lang) }); }
   };
   return (
     <div className="flex flex-col gap-6 max-w-xl">
@@ -933,7 +984,7 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
           ))}</div>
         </Field>
         <Field label={t("usdtRate", lang)}>
-          <TInput type="number" value={data.settings.usdtToIrt} onChange={e => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(e.target.value) } }))} />
+          <NumberInput value={String(data.settings.usdtToIrt)} onChange={v => setData(d => ({ ...d, settings: { ...d.settings, usdtToIrt: Number(v) || 0 } }))} />
         </Field>
       </Card>
       <Card className="p-5 flex flex-col gap-3">
@@ -946,25 +997,6 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
         </div>
         {importMsg && <div className="text-[11px]" style={{ color: importMsg.type === "success" ? PALETTE.teal : PALETTE.coral }}>{importMsg.text}</div>}
       </Card>
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{t("recurring", lang)}</h3>
-          <Button variant="ghost" className="!py-1.5 text-xs" onClick={openRecurringModal}><Plus size={13} />{t("addRecurring", lang)}</Button>
-        </div>
-        {data.recurring.length === 0 ? <div className="text-sm" style={{ color: PALETTE.inkDim }}>{t("noData", lang)}</div> : (
-          <div className="flex flex-col gap-2">
-            {data.recurring.map(r => {
-              const target = targets.find(x => x.id === r.targetId);
-              return (
-                <div key={r.id} className="flex items-center justify-between text-sm">
-                  <span style={{ color: PALETTE.ink }}>{r.label} → {target?.name}</span>
-                  <div className="flex items-center gap-2"><span style={{ color: PALETTE.teal }}>{r.amountMeta ? fmtExact(r.amountMeta.entered, r.amountMeta.currency) : fmtUSD(r.amount || 0)}</span><Button variant="ghost" className="!py-1 !px-2 text-[11px]" onClick={() => logRecurring(r)}>{t("logThisMonth", lang)}</Button></div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
     </div>
   );
 }
@@ -973,49 +1005,56 @@ function SettingsView({ data, setData, lang, setLang, currency, setCurrency, ope
    MODALS
    ============================================================================ */
 function BasketModal({ initial, defaultCategory, rate, onSave, onClose, lang }) {
-  const [form, setForm] = useState(initial || { name: "", category: defaultCategory || "bank", balance: 0, address: "", chain: "ethereum" });
+  const [form, setForm] = useState(initial
+    ? { ...initial }
+    : { name: "", category: defaultCategory || "bank", balance: 0, nativeCurrency: "USD", address: "", chain: "ethereum" });
   const isWallet = form.category === "hotWallet" || form.category === "coldWallet";
   return (
     <Modal title={initial ? t("edit", lang) : t("addBasket", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
         <Field label={t("category", lang)}><TSelect value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>{Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{catLabel(c, lang)}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v.usd })} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} initialEntered={initial?.balance} initialCurrency={initial?.nativeCurrency || "USD"} onChange={v => setForm({ ...form, balance: v.entered, nativeCurrency: v.currency })} rate={rate} lang={lang} />
         {isWallet && (
           <>
             <Field label={t("walletAddress", lang)}><TInput value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="0x… / bc1…" /></Field>
             <Field label={t("chain", lang)}><TSelect value={form.chain || "ethereum"} onChange={e => setForm({ ...form, chain: e.target.value })}>{CHAIN_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}</TSelect></Field>
           </>
         )}
+        <p className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("nativeCurrencyNote", lang)}</p>
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
 }
 function DefiModal({ initial, wallets, rate, onSave, onClose, lang }) {
-  const [form, setForm] = useState(initial || { name: "", walletId: wallets[0]?.id || "", balance: 0, apy: "" });
+  const [form, setForm] = useState(initial
+    ? { ...initial, apy: initial.apy != null ? String(initial.apy) : "" }
+    : { name: "", walletId: wallets[0]?.id || "", balance: 0, nativeCurrency: "USD", apy: "" });
   return (
     <Modal title={initial ? t("edit", lang) : t("addDefi", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Aave USDC lending" /></Field>
         <Field label={t("connectedWallet", lang)}><TSelect value={form.walletId} onChange={e => setForm({ ...form, walletId: e.target.value })}>{wallets.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.balance} onChange={v => setForm({ ...form, balance: v.usd })} rate={rate} lang={lang} />
-        <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
+        <AmountField label={t("amount", lang)} initialEntered={initial?.balance} initialCurrency={initial?.nativeCurrency || "USD"} onChange={v => setForm({ ...form, balance: v.entered, nativeCurrency: v.currency })} rate={rate} lang={lang} />
+        <Field label={t("apy", lang)}><NumberInput value={form.apy} onChange={v => setForm({ ...form, apy: v })} placeholder="0" /></Field>
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ ...form, apy: Number(form.apy) || 0 })} disabled={!form.walletId || !form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
 }
 function LoanModal({ initial, rate, onSave, onClose, lang }) {
-  const [form, setForm] = useState(initial || { name: "", principal: 0, apy: "", months: "", dueDay: "" });
+  const [form, setForm] = useState(initial
+    ? { ...initial, apy: String(initial.apy ?? ""), months: String(initial.months ?? ""), dueDay: String(initial.dueDay ?? "") }
+    : { name: "", principal: 0, nativeCurrency: "USD", apy: "", months: "", dueDay: "" });
   return (
     <Modal title={initial ? t("edit", lang) : t("addLoan", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-        <AmountField label={t("principal", lang)} usdValue={form.principal} onChange={v => setForm({ ...form, principal: v.usd })} rate={rate} lang={lang} />
-        <Field label={t("apy", lang)}><TInput type="number" value={form.apy} onChange={e => setForm({ ...form, apy: e.target.value })} placeholder="0" /></Field>
-        <Field label={t("months", lang)}><TInput type="number" value={form.months} onChange={e => setForm({ ...form, months: e.target.value })} placeholder="12" /></Field>
-        <Field label={t("dueDay", lang)}><TInput type="number" min={1} max={28} value={form.dueDay} onChange={e => setForm({ ...form, dueDay: e.target.value })} placeholder="1" /></Field>
+        <AmountField label={t("principal", lang)} initialEntered={initial?.principal} initialCurrency={initial?.nativeCurrency || "USD"} onChange={v => setForm({ ...form, principal: v.entered, nativeCurrency: v.currency })} rate={rate} lang={lang} />
+        <Field label={t("apy", lang)}><NumberInput value={form.apy} onChange={v => setForm({ ...form, apy: v })} placeholder="0" /></Field>
+        <Field label={t("months", lang)}><NumberInput value={form.months} onChange={v => setForm({ ...form, months: v })} placeholder="12" /></Field>
+        <Field label={t("dueDay", lang)}><NumberInput value={form.dueDay} onChange={v => setForm({ ...form, dueDay: v })} placeholder="1" /></Field>
         <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ ...form, apy: Number(form.apy) || 0, months: Number(form.months) || 1, dueDay: Number(form.dueDay) || 1 })} disabled={!form.name || !form.principal}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
@@ -1023,13 +1062,13 @@ function LoanModal({ initial, rate, onSave, onClose, lang }) {
 }
 function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
   const suggested = loanMonthlyPayment(loan.principal, loan.apy, loan.months);
-  const [amountMeta, setAmountMeta] = useState({ usd: suggested, entered: suggested, currency: "USD" });
+  const [amountMeta, setAmountMeta] = useState({ usd: loan.nativeCurrency === "IRT" ? suggested / (rate || 1) : suggested, entered: suggested, currency: loan.nativeCurrency || "USD" });
   const [basketId, setBasketId] = useState("");
   const [note, setNote] = useState("");
   return (
     <Modal title={`${t("logPayment", lang)} · ${loan.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} onChange={setAmountMeta} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} initialEntered={suggested} initialCurrency={loan.nativeCurrency || "USD"} onChange={setAmountMeta} rate={rate} lang={lang} />
         <Field label={t("payFrom", lang)}>
           <TSelect value={basketId} onChange={e => setBasketId(e.target.value)}>
             <option value="">{t("noAccount", lang)}</option>
@@ -1037,31 +1076,39 @@ function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
           </TSelect>
         </Field>
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.usd}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.entered}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
 }
 function GoalModal({ initial, rate, onSave, onClose, lang }) {
-  const [form, setForm] = useState(initial || { name: "", targetAmount: 0, currentAmount: 0 });
+  const [form, setForm] = useState(initial ? { ...initial } : { name: "", targetAmount: 0, currentAmount: 0, nativeCurrency: "USD" });
+  const [targetMeta, setTargetMeta] = useState({ usd: 0, entered: initial?.targetAmount || 0, currency: initial?.nativeCurrency || "USD" });
+  const [currentMeta, setCurrentMeta] = useState({ usd: 0, entered: initial?.currentAmount || 0, currency: initial?.nativeCurrency || "USD" });
+  const save = () => {
+    const nativeCurrency = targetMeta.currency;
+    const currentInTarget = amountInCurrency(currentMeta, nativeCurrency, rate);
+    onSave({ ...form, targetAmount: targetMeta.entered, currentAmount: currentInTarget, nativeCurrency });
+  };
   return (
     <Modal title={initial ? t("edit", lang) : t("addGoal", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <Field label={t("name", lang)}><TInput value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-        <AmountField label={t("targetAmount", lang)} usdValue={form.targetAmount} onChange={v => setForm({ ...form, targetAmount: v.usd })} rate={rate} lang={lang} />
-        <AmountField label={t("currentAmount", lang)} usdValue={form.currentAmount} onChange={v => setForm({ ...form, currentAmount: v.usd })} rate={rate} lang={lang} />
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)} disabled={!form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <AmountField label={t("targetAmount", lang)} initialEntered={initial?.targetAmount} initialCurrency={initial?.nativeCurrency || "USD"} onChange={setTargetMeta} rate={rate} lang={lang} />
+        <AmountField label={t("currentAmount", lang)} initialEntered={initial?.currentAmount} initialCurrency={initial?.nativeCurrency || "USD"} onChange={setCurrentMeta} rate={rate} lang={lang} />
+        <p className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("nativeCurrencyNote", lang)}</p>
+        <div className="flex gap-2 mt-2"><Button onClick={save} disabled={!form.name}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
 }
 function GoalTxModal({ goal, type, rate, onSave, onClose, lang }) {
-  const [amountMeta, setAmountMeta] = useState({ usd: 0, entered: 0, currency: "USD" });
+  const [amountMeta, setAmountMeta] = useState({ usd: 0, entered: 0, currency: goal.nativeCurrency || "USD" });
   return (
     <Modal title={`${t(type, lang)} · ${goal.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} onChange={setAmountMeta} rate={rate} lang={lang} />
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(amountMeta)} disabled={!amountMeta.usd}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <AmountField label={t("amount", lang)} initialCurrency={goal.nativeCurrency || "USD"} onChange={setAmountMeta} rate={rate} lang={lang} />
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(amountMeta)} disabled={!amountMeta.entered}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1094,28 +1141,14 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
             ))}
           </div>
         </Field>
-        <AmountField label={t("amount", lang)} usdValue={amountMeta.usd} initialEntered={editing ? Math.abs(editing.displayAmount ?? editing.amount) : undefined} initialCurrency={editing?.displayCurrency} onChange={setAmountMeta} rate={rate} lang={lang} />
+        <AmountField label={t("amount", lang)} initialEntered={editing ? Math.abs(editing.displayAmount ?? editing.amount) : undefined} initialCurrency={editing?.displayCurrency || "USD"} onChange={setAmountMeta} rate={rate} lang={lang} />
         {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} />}
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
-        {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtUSD(target.balance)}</div>}
+        {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtExact(target.balance, target.nativeCurrency)}</div>}
         <div className="flex gap-2 mt-2">
-          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amountMeta, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amountMeta.usd}>{t("save", lang)}</Button>
+          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amountMeta, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amountMeta.entered}>{t("save", lang)}</Button>
           <Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button>
         </div>
-      </div>
-    </Modal>
-  );
-}
-function RecurringModal({ data, rate, onSave, onClose, lang }) {
-  const targets = useMemo(() => allTargets(data), [data]);
-  const [form, setForm] = useState({ label: "", targetId: targets[0]?.id || "", amountMeta: { usd: 0, entered: 0, currency: "USD" } });
-  return (
-    <Modal title={t("addRecurring", lang)} onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        <Field label={t("name", lang)}><TInput value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} /></Field>
-        <Field label={t("selectBasket", lang)}><TSelect value={form.targetId} onChange={e => setForm({ ...form, targetId: e.target.value })}>{targets.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</TSelect></Field>
-        <AmountField label={t("amount", lang)} usdValue={form.amountMeta.usd} onChange={v => setForm({ ...form, amountMeta: v })} rate={rate} lang={lang} />
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave(form)}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1136,8 +1169,6 @@ export default function WealthDashboard() {
   const setLang = (l) => setData(d => ({ ...d, settings: { ...d.settings, lang: typeof l === "function" ? l(d.settings.lang) : l } }));
   const setCurrency = (c) => setData(d => ({ ...d, settings: { ...d.settings, currency: typeof c === "function" ? c(d.settings.currency) : c } }));
 
-  // Fetch the live USDT→IRT rate once whenever the app is opened, and let
-  // the header's rate badge trigger a manual retry/refresh on click.
   const refreshLiveRate = () => {
     setLiveRate(r => ({ ...r, loading: true, error: null }));
     fetchUsdtRateLive()
@@ -1193,12 +1224,26 @@ export default function WealthDashboard() {
   const deleteLoan = (id) => setData(d => ({ ...d, loans: d.loans.filter(l => l.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
   const logLoanPayment = (loan, { amountMeta, basketId, note }) => {
     setData(d => {
-      const loans = d.loans.map(l => l.id === loan.id ? { ...l, amountPaid: (Number(l.amountPaid) || 0) + amountMeta.usd, payments: [...(l.payments || []), { id: uid(), date: nowISO(), amount: amountMeta.usd }] } : l);
-      const baskets = basketId ? d.baskets.map(b => b.id === basketId ? { ...b, balance: (Number(b.balance) || 0) - amountMeta.usd } : b) : d.baskets;
+      const loanDelta = amountInCurrency(amountMeta, loan.nativeCurrency || "USD", rate);
+      let baskets = d.baskets;
+      let secondaryTargetType = null, secondaryTargetId = null, secondaryDelta = null;
+      if (basketId) {
+        const basket = d.baskets.find(b => b.id === basketId);
+        const basketDelta = -amountInCurrency(amountMeta, basket?.nativeCurrency || "USD", rate);
+        baskets = d.baskets.map(b => b.id === basketId ? { ...b, balance: (Number(b.balance) || 0) + basketDelta } : b);
+        secondaryTargetType = "basket"; secondaryTargetId = basketId; secondaryDelta = basketDelta;
+      }
+      const activityId = uid();
+      const loans = d.loans.map(l => l.id === loan.id ? {
+        ...l,
+        amountPaid: (Number(l.amountPaid) || 0) + loanDelta,
+        payments: [...(l.payments || []), { id: activityId, date: nowISO(), amount: loanDelta }],
+      } : l);
       const activity = {
-        id: uid(), date: nowISO(), type: "withdraw",
-        targetId: basketId || loan.id, targetType: basketId ? "basket" : "loan",
-        category: basketId ? (d.baskets.find(b => b.id === basketId)?.category || "loan") : "loan",
+        id: activityId, date: nowISO(), type: "withdraw",
+        targetType: "loan", targetId: loan.id, targetDelta: loanDelta,
+        secondaryTargetType, secondaryTargetId, secondaryDelta,
+        category: basketId ? (baskets.find(b => b.id === basketId)?.category || "loan") : "loan",
         amount: -Math.abs(amountMeta.usd),
         displayAmount: -Math.abs(amountMeta.entered), displayCurrency: amountMeta.currency,
         note: note || `${t("logPayment", lang)}: ${loan.name}`,
@@ -1222,10 +1267,12 @@ export default function WealthDashboard() {
   const deleteGoal = (id) => setData(d => ({ ...d, goals: d.goals.filter(g => g.id !== id), activities: d.activities.filter(a => a.targetId !== id) }));
   const goalTx = (goal, type, amountMeta) => {
     setData(d => {
+      const magnitude = amountInCurrency(amountMeta, goal.nativeCurrency || "USD", rate);
+      const signedNative = type === "withdraw" ? -magnitude : magnitude;
+      const goals = d.goals.map(g => g.id === goal.id ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) + signedNative, 0) } : g);
       const signedUsd = type === "withdraw" ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
       const signedDisplay = type === "withdraw" ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
-      const goals = d.goals.map(g => g.id === goal.id ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) + signedUsd, 0) } : g);
-      const activity = { id: uid(), date: nowISO(), type, targetId: goal.id, targetType: "goal", category: "goal", amount: signedUsd, displayAmount: signedDisplay, displayCurrency: amountMeta.currency, note: goal.name, txCategory: null, pctOfTotal: 0 };
+      const activity = { id: uid(), date: nowISO(), type, targetType: "goal", targetId: goal.id, targetDelta: signedNative, category: "goal", amount: signedUsd, displayAmount: signedDisplay, displayCurrency: amountMeta.currency, note: goal.name, txCategory: null, pctOfTotal: 0 };
       return { ...d, goals, activities: [...d.activities, activity] };
     });
     setModal(null);
@@ -1239,21 +1286,26 @@ export default function WealthDashboard() {
   };
   const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory }) => {
     setData(d => {
-      const signedUsd = (type === "withdraw") ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
-      const signedDisplay = (type === "withdraw") ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
       let next = d;
       if (id) {
-        // Editing: revert the old amount's effect, then apply the new one.
         const old = d.activities.find(a => a.id === id);
-        if (old) next = applyTargetDelta(next, old.targetType, old.targetId, -old.amount);
+        if (old) next = applyTargetDelta(next, old.targetType, old.targetId, -old.targetDelta);
       }
-      next = applyTargetDelta(next, targetType, targetId, signedUsd);
-      const prevTotal = totalNetWorth(next);
+      const nativeCurrency = targetType === "defi"
+        ? (next.defiPositions.find(p => p.id === targetId)?.nativeCurrency || "USD")
+        : (next.baskets.find(b => b.id === targetId)?.nativeCurrency || "USD");
+      const magnitude = amountInCurrency(amountMeta, nativeCurrency, rate);
+      const signedNative = type === "withdraw" ? -magnitude : magnitude;
+      next = applyTargetDelta(next, targetType, targetId, signedNative);
+
+      const signedUsd = type === "withdraw" ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
+      const signedDisplay = type === "withdraw" ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
+      const prevTotal = totalNetWorth(next, rate);
       const pctOfTotal = prevTotal !== 0 ? (signedUsd / Math.abs(prevTotal)) * 100 : (signedUsd !== 0 ? 100 : 0);
       const category = targetType === "defi" ? "defi" : next.baskets.find(b => b.id === targetId)?.category;
       const activity = {
         id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(),
-        type, targetId, targetType, category, amount: signedUsd,
+        type, targetId, targetType, targetDelta: signedNative, category, amount: signedUsd,
         displayAmount: signedDisplay, displayCurrency: amountMeta.currency,
         note, txCategory, pctOfTotal,
       };
@@ -1266,28 +1318,18 @@ export default function WealthDashboard() {
     setData(d => {
       const old = d.activities.find(a => a.id === id);
       if (!old) return d;
-      let next = applyTargetDelta(d, old.targetType, old.targetId, -old.amount);
-      if (old.targetType === "loan") next = { ...next, loans: next.loans.map(l => l.id === old.targetId ? { ...l, amountPaid: Math.max((Number(l.amountPaid) || 0) - Math.abs(old.amount), 0) } : l) };
-      if (old.targetType === "goal") next = { ...next, goals: next.goals.map(g => g.id === old.targetId ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) - old.amount, 0) } : g) };
+      let next = applyTargetDelta(d, old.targetType, old.targetId, -(old.targetDelta ?? old.amount));
+      if (old.secondaryTargetType) next = applyTargetDelta(next, old.secondaryTargetType, old.secondaryTargetId, -old.secondaryDelta);
+      if (old.targetType === "loan") next = { ...next, loans: next.loans.map(l => l.id === old.targetId ? { ...l, amountPaid: Math.max((Number(l.amountPaid) || 0) - (old.targetDelta ?? Math.abs(old.amount)), 0), payments: (l.payments || []).filter(p => p.id !== old.id) } : l) };
+      if (old.targetType === "goal") next = { ...next, goals: next.goals.map(g => g.id === old.targetId ? { ...g, currentAmount: Math.max((Number(g.currentAmount) || 0) - (old.targetDelta ?? old.amount), 0) } : g) };
       return { ...next, activities: next.activities.filter(a => a.id !== id) };
     });
   };
 
-
-  /* ---------------- recurring income ---------------- */
-  const saveRecurring = (form) => { setData(d => ({ ...d, recurring: [...d.recurring, { ...form, id: uid() }] })); setModal(null); };
-  const logRecurring = (r) => {
-    const targets = allTargets(data);
-    const target = targets.find(x => x.id === r.targetId);
-    if (!target) return;
-    const amountMeta = r.amountMeta || { usd: Number(r.amount) || 0, entered: Number(r.amount) || 0, currency: "USD" };
-    saveTx({ targetId: r.targetId, targetType: target.type, type: "interest", amountMeta, note: r.label, txCategory: null });
-  };
-
-  /* ---------------- full backup export / import ---------------- */
+  /* ---------------- backup export / import ---------------- */
   const exportBackup = () => {
-    const payload = { app: "ledger-wealth-dashboard", version: 1, exportedAt: nowISO(), data };
-    downloadJSON(payload, `ledger-backup-${Date.now()}.json`);
+    const payload = { app: "poolakoo", version: 2, exportedAt: nowISO(), data };
+    downloadJSON(payload, `poolakoo-backup-${Date.now()}.json`);
   };
   const importBackup = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1295,13 +1337,8 @@ export default function WealthDashboard() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        // Accept either the wrapped { app, version, data } shape this app
-        // exports, or a raw state object (for resilience/manual editing).
         const incoming = parsed && parsed.data && typeof parsed.data === "object" ? parsed.data : parsed;
-        if (!incoming || typeof incoming !== "object" || !Array.isArray(incoming.baskets)) {
-          reject(new Error("Invalid backup file"));
-          return;
-        }
+        if (!incoming || typeof incoming !== "object" || !Array.isArray(incoming.baskets)) { reject(new Error("Invalid backup file")); return; }
         setData({ ...DEFAULT_DATA, ...incoming, settings: { ...DEFAULT_DATA.settings, ...(incoming.settings || {}) } });
         resolve();
       } catch (e) { reject(e); }
@@ -1356,7 +1393,7 @@ export default function WealthDashboard() {
           {view === "activity" && <ActivityView data={data} lang={lang} currency={currency} rate={rate}
             openEditActivity={(a) => setModal({ kind: "tx", payload: { targetId: a.targetId, targetType: a.targetType }, editing: a })}
             deleteActivity={deleteActivity} />}
-          {view === "settings" && <SettingsView data={data} setData={setData} lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} openRecurringModal={() => setModal({ kind: "recurring" })} logRecurring={logRecurring} onExportBackup={exportBackup} onImportBackup={importBackup} />}
+          {view === "settings" && <SettingsView data={data} setData={setData} lang={lang} setLang={setLang} currency={currency} setCurrency={setCurrency} onExportBackup={exportBackup} onImportBackup={importBackup} />}
         </main>
       </div>
       <MobileNav view={view} setView={setView} lang={lang} />
@@ -1366,12 +1403,11 @@ export default function WealthDashboard() {
       {modal?.kind === "loan" && <LoanModal initial={modal.payload} rate={rate} lang={lang} onSave={saveLoan} onClose={() => setModal(null)} />}
       {modal?.kind === "loanPay" && <LoanPaymentModal loan={modal.payload} baskets={data.baskets} rate={rate} lang={lang} onSave={(payload) => logLoanPayment(modal.payload, payload)} onClose={() => setModal(null)} />}
       {modal?.kind === "goal" && <GoalModal initial={modal.payload} rate={rate} lang={lang} onSave={saveGoal} onClose={() => setModal(null)} />}
-      {modal?.kind === "goalTx" && <GoalTxModal goal={modal.payload} type={modal.txType} rate={rate} lang={lang} onSave={(amt) => goalTx(modal.payload, modal.txType, amt)} onClose={() => setModal(null)} />}
+      {modal?.kind === "goalTx" && <GoalTxModal goal={modal.payload} type={modal.txType} rate={rate} lang={lang} onSave={(meta) => goalTx(modal.payload, modal.txType, meta)} onClose={() => setModal(null)} />}
       {modal?.kind === "tx" && (
         <TxModal data={data} initialTargetId={modal.payload?.targetId} initialTargetType={modal.payload?.targetType} initialType={modal.payload?.type} editing={modal.editing}
           rate={rate} lang={lang} onSave={saveTx} onClose={() => setModal(null)} />
       )}
-      {modal?.kind === "recurring" && <RecurringModal data={data} rate={rate} lang={lang} onSave={saveRecurring} onClose={() => setModal(null)} />}
     </div>
   );
 }
