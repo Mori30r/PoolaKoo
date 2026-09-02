@@ -5,7 +5,7 @@ import {
   Plus, Minus, RefreshCw, Download, X, Globe, ArrowUpRight, ArrowDownRight,
   Trash2, Edit3, ArrowLeftRight, Sparkles, ShoppingCart, UtensilsCrossed, Wifi,
   Shirt, PartyPopper, Receipt, HandCoins, MoreHorizontal, Target, List, PieChart as PieChartIcon, Coins, Upload,
-  Users, LineChart, Calculator
+  Users, LineChart, Calculator, Gift
 } from "lucide-react";
 import {
   ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -68,7 +68,19 @@ const TX_CATEGORIES = {
   loan:       { label: { en: "Loan", fa: "وام" }, icon: HandCoins, color: "#E8D75C" },
   others:     { label: { en: "Others", fa: "سایر" }, icon: MoreHorizontal, color: "#8DA0AC" },
 };
+// Categories offered when the transaction type is "deposit" (income), kept
+// distinct from the expense categories above.
+const DEPOSIT_CATEGORIES = {
+  airdrop:  { label: { en: "Airdrop", fa: "ایردراپ" }, icon: Gift, color: "#E8B15C" },
+  interest: { label: { en: "Interest", fa: "سود" }, icon: Sparkles, color: PALETTE.teal },
+  work:     { label: { en: "Work", fa: "کار" }, icon: Briefcase, color: PALETTE.violet },
+  other:    { label: { en: "Other", fa: "سایر" }, icon: MoreHorizontal, color: "#8DA0AC" },
+};
 function txCatLabel(key, lang) { return TX_CATEGORIES[key]?.label[lang] || key; }
+function depositCatLabel(key, lang) { return DEPOSIT_CATEGORIES[key]?.label[lang] || key; }
+// Looks up icon/color/label for a txCategory value regardless of whether it
+// came from the expense set or the income set.
+function txCategoryMeta(key) { return TX_CATEGORIES[key] || DEPOSIT_CATEGORIES[key] || null; }
 
 const CHAIN_OPTIONS = [
   { id: "ethereum", label: "Ethereum" }, { id: "binance_smart", label: "BNB Smart Chain" },
@@ -81,7 +93,9 @@ const CHAIN_OPTIONS = [
 async function fetchUsdtRateLive() {
   const res = await fetch("/api/usdt");
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.irt == null) throw new Error(body?.error || "Could not fetch USDT rate");
+  if (!res.ok || body.irt == null) {
+    throw new Error(body?.detail || body?.error || "Could not fetch USDT rate");
+  }
   return body.irt;
 }
 
@@ -126,6 +140,11 @@ const STR = {
   emptyDefi: { en: "No DeFi positions yet — connect one to a wallet.", fa: "هنوز پوزیشن دیفای نساخته‌اید." },
   needsWalletFirst: { en: "Add a hot or cold wallet before creating a DeFi position.", fa: "قبل از ساخت پوزیشن دیفای، یک کیف‌پول اضافه کنید." },
   spendingCategory: { en: "Spending Category (optional)", fa: "دسته‌بندی هزینه (اختیاری)" },
+  incomeCategory: { en: "Income Category (optional)", fa: "دسته‌بندی درآمد (اختیاری)" },
+  transferFrom: { en: "Transfer From", fa: "انتقال از" },
+  transferTo: { en: "Transfer To", fa: "انتقال به" },
+  transferNeedsTwo: { en: "You need at least two baskets or DeFi positions to transfer between.", fa: "برای انتقال به حداقل دو بسکت یا پوزیشن دیفای نیاز دارید." },
+  confirmDelete: { en: "Are you sure you want to delete this? This can't be undone.", fa: "آیا مطمئن هستید که می‌خواهید این را حذف کنید؟ این کار قابل بازگشت نیست." },
   addLoan: { en: "New Loan", fa: "وام جدید" }, principal: { en: "Principal", fa: "مبلغ اصلی وام" },
   months: { en: "Months to Repay", fa: "تعداد ماه بازپرداخت" }, dueDay: { en: "Monthly Due Day (1–28)", fa: "روز سررسید ماهانه (۱ تا ۲۸)" },
   monthlyPayment: { en: "Monthly Payment", fa: "قسط ماهانه" }, totalOwed: { en: "Total to Repay", fa: "مجموع بازپرداخت" },
@@ -193,6 +212,11 @@ function fmtExact(n, curr) {
   return curr === "USD" ? fmtUSD(v) : Math.round(v).toLocaleString("en-US") + " تومان";
 }
 function pct(n) { const v = Number(n) || 0; const sign = v > 0 ? "+" : ""; return sign + v.toFixed(2) + "%"; }
+// Wraps any delete action with a native confirm() prompt — used on every
+// delete button across the app so nothing is removed by an accidental tap.
+function confirmAnd(lang, fn) {
+  return () => { if (window.confirm(t("confirmDelete", lang))) fn(); };
+}
 function downloadJSON(obj, filename) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -360,11 +384,11 @@ function AmountField({ label, initialEntered, initialCurrency = "USD", onChange,
   );
 }
 
-function CategoryPicker({ value, onChange, lang }) {
+function CategoryPicker({ value, onChange, lang, categories, label }) {
   return (
-    <Field label={t("spendingCategory", lang)}>
+    <Field label={label}>
       <div className="grid grid-cols-4 gap-2">
-        {Object.entries(TX_CATEGORIES).map(([key, meta]) => {
+        {Object.entries(categories).map(([key, meta]) => {
           const Icon = meta.icon;
           const active = value === key;
           return (
@@ -519,7 +543,7 @@ function MobileNav({ view, setView, lang }) {
 }
 function Header({ lang, setLang, currency, setCurrency, view, rate, liveRate, onRefreshRate }) {
   const rateTitle = liveRate.error
-    ? t("rateUnavailable", lang)
+    ? `${t("rateUnavailable", lang)} — ${liveRate.error}`
     : `${t("liveRateTitle", lang)}: ${fmtIRT(1, rate)}${liveRate.updatedAt ? " · " + new Date(liveRate.updatedAt).toLocaleTimeString(lang === "fa" ? "fa-IR" : "en-US") : ""}`;
   return (
     <header className="flex items-center justify-between px-5 md:px-8 py-5 sticky top-0 z-30 backdrop-blur" style={{ background: `${PALETTE.bg}E6`, borderBottom: `1px solid ${PALETTE.panelBorder}` }}>
@@ -653,7 +677,7 @@ function BasketCard({ basket, lang, currency, rate, onEdit, onDelete, onQuickTx 
           <IconBadge Icon={Icon} color={meta.color} />
           <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{basket.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{catLabel(basket.category, lang)} · {basket.nativeCurrency || "USD"}</div></div>
         </div>
-        <div className="flex gap-1"><button onClick={() => onEdit(basket)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => onDelete(basket.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+        <div className="flex gap-1"><button onClick={() => onEdit(basket)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => onDelete(basket.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
       </div>
       <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(basket.balance, basket.nativeCurrency, currency, rate)}</div>
       <div className="flex gap-2 mt-1">
@@ -705,7 +729,7 @@ function WalletsView({ data, lang, currency, rate, openBasketModal, deleteBasket
                     <IconBadge Icon={meta.icon} color={meta.color} />
                     <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{w.name}</div><div className="text-[11px] font-mono" style={{ color: PALETTE.inkDim }}>{w.address ? `${w.address.slice(0, 6)}…${w.address.slice(-4)} · ` : ""}{chainLabel} · {w.nativeCurrency || "USD"}</div></div>
                   </div>
-                  <div className="flex gap-1"><button onClick={() => openBasketModal(w)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteBasket(w.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+                  <div className="flex gap-1"><button onClick={() => openBasketModal(w)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => deleteBasket(w.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
                 </div>
                 <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(w.balance, w.nativeCurrency, currency, rate)}</div>
                 <div className="flex gap-2">
@@ -739,7 +763,7 @@ function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openT
               <Card key={p.id} className="p-4 flex flex-col gap-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{p.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"} · {p.nativeCurrency || "USD"}</div></div></div>
-                  <div className="flex gap-1"><button onClick={() => openDefiModal(p)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => deleteDefi(p.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+                  <div className="flex gap-1"><button onClick={() => openDefiModal(p)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => deleteDefi(p.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
                 </div>
                 <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(p.balance, p.nativeCurrency, currency, rate)}</div>
                 <div className="text-xs" style={{ color: PALETTE.amber }}>{p.apy}% APY · {displayNative(monthlyNative, p.nativeCurrency, currency, rate)}/mo</div>
@@ -780,7 +804,7 @@ function LoanCard({ loan, lang, currency, rate, onEdit, onDelete, onPay }) {
         <div className="flex items-center gap-2">
           {paidOff && <span className="text-[10px] font-medium rounded-full px-2 py-0.5" style={{ background: `${PALETTE.teal}22`, color: PALETTE.teal }}>{t("paidOff", lang)}</span>}
           <button onClick={() => onEdit(loan)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button>
-          <button onClick={() => onDelete(loan.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button>
+          <button onClick={confirmAnd(lang, () => onDelete(loan.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 text-xs">
@@ -840,7 +864,7 @@ function DebtCard({ debt, lang, currency, rate, onEdit, onDelete, onPay }) {
         <div className="flex items-center gap-2">
           {settled && <span className="text-[10px] font-medium rounded-full px-2 py-0.5" style={{ background: `${PALETTE.teal}22`, color: PALETTE.teal }}>{t("paidOff", lang)}</span>}
           <button onClick={() => onEdit(debt)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button>
-          <button onClick={() => onDelete(debt.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button>
+          <button onClick={confirmAnd(lang, () => onDelete(debt.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 text-xs">
@@ -891,7 +915,7 @@ function GoalCard({ goal, lang, currency, rate, onEdit, onDelete, onTx }) {
     <Card className="p-4 flex flex-col items-center gap-3 text-center">
       <div className="w-full flex items-start justify-between">
         <IconBadge Icon={GOAL_META.icon} color={GOAL_META.color} />
-        <div className="flex gap-1"><button onClick={() => onEdit(goal)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={() => onDelete(goal.id)} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+        <div className="flex gap-1"><button onClick={() => onEdit(goal)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => onDelete(goal.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
       </div>
       <CircularProgress percent={percent} color={GOAL_META.color} />
       <div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{goal.name}</div>
@@ -991,7 +1015,7 @@ function TradingView({ rate, lang }) {
    ACTIVITY VIEW (List + categorized Breakdown)
    ============================================================================ */
 function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
-  const catMeta = a.txCategory ? TX_CATEGORIES[a.txCategory] : null;
+  const catMeta = a.txCategory ? txCategoryMeta(a.txCategory) : null;
   const Icon = catMeta ? catMeta.icon : (a.type === "deposit" ? Plus : a.type === "withdraw" ? Minus : a.type === "transfer" ? ArrowLeftRight : Sparkles);
   const color = catMeta ? catMeta.color : (Number(a.amount) >= 0 ? PALETTE.teal : PALETTE.coral);
   const positive = Number(a.amount) >= 0;
@@ -1018,7 +1042,7 @@ function ActivityRow({ a, target, currency, rate, lang, onEdit, onDelete }) {
         </div>
         <div className="flex flex-col gap-1">
           {editable ? <button onClick={() => onEdit(a)} style={{ color: PALETTE.inkDim }}><Edit3 size={13} /></button> : <span style={{ width: 13 }} />}
-          <button onClick={() => onDelete(a.id)} style={{ color: PALETTE.coral }}><Trash2 size={13} /></button>
+          <button onClick={confirmAnd(lang, () => onDelete(a.id))} style={{ color: PALETTE.coral }}><Trash2 size={13} /></button>
         </div>
       </div>
     </div>
@@ -1052,7 +1076,7 @@ function ActivityBreakdown({ data, lang, currency, rate }) {
       {groups.length === 0 ? <div className="text-sm py-6 text-center" style={{ color: PALETTE.inkDim }}>{t("noData", lang)}</div> : (
         <div className="flex flex-col gap-3">
           {groups.map(([key, value]) => {
-            const meta = TX_CATEGORIES[key] || TX_CATEGORIES.others;
+            const meta = txCategoryMeta(key) || TX_CATEGORIES.others;
             const Icon = meta.icon;
             return (
               <div key={key} className="flex flex-col gap-1.5">
@@ -1109,7 +1133,12 @@ function ActivityView({ data, lang, currency, rate, openEditActivity, deleteActi
           <div className="flex flex-wrap gap-3">
             <TSelect value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ width: "auto" }}>
               <option value="all">{t("allCategories", lang)}</option>
-              {Object.keys(TX_CATEGORIES).map(c => <option key={c} value={c}>{txCatLabel(c, lang)}</option>)}
+              <optgroup label={t("expenses", lang)}>
+                {Object.keys(TX_CATEGORIES).map(c => <option key={c} value={c}>{txCatLabel(c, lang)}</option>)}
+              </optgroup>
+              <optgroup label={t("income", lang)}>
+                {Object.keys(DEPOSIT_CATEGORIES).map(c => <option key={c} value={c}>{depositCatLabel(c, lang)}</option>)}
+              </optgroup>
             </TSelect>
             <TSelect value={filterTarget} onChange={e => setFilterTarget(e.target.value)} style={{ width: "auto" }}>
               <option value="all">{t("selectBasket", lang)}</option>
@@ -1343,10 +1372,19 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
   const [targetType, targetId] = targetKey ? targetKey.split(":") : [null, null];
   const target = targets.find(x => x.id === targetId);
 
+  const toOptions = targets.filter(x => `${x.type}:${x.id}` !== targetKey);
+  const [toTargetKey, setToTargetKey] = useState(() => {
+    if (editing?.secondaryTargetType && editing?.secondaryTargetId) return `${editing.secondaryTargetType}:${editing.secondaryTargetId}`;
+    return toOptions[0] ? `${toOptions[0].type}:${toOptions[0].id}` : "";
+  });
+  const [toTargetType, toTargetId] = toTargetKey ? toTargetKey.split(":") : [null, null];
+
+  const isTransfer = type === "transfer";
+
   return (
     <Modal title={editing ? t("editActivity", lang) : t("addTx", lang)} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <Field label={t("selectBasket", lang)}>
+        <Field label={isTransfer ? t("transferFrom", lang) : t("selectBasket", lang)}>
           <TSelect value={targetKey} onChange={e => setTargetKey(e.target.value)}>{targets.map(x => <option key={`${x.type}:${x.id}`} value={`${x.type}:${x.id}`}>{x.name}</option>)}</TSelect>
         </Field>
         <Field label={t("category", lang)}>
@@ -1356,12 +1394,26 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
             ))}
           </div>
         </Field>
+        {isTransfer && (
+          <Field label={t("transferTo", lang)}>
+            {toOptions.length === 0 ? (
+              <div className="text-xs" style={{ color: PALETTE.coral }}>{t("transferNeedsTwo", lang)}</div>
+            ) : (
+              <TSelect value={toTargetKey} onChange={e => setToTargetKey(e.target.value)}>{toOptions.map(x => <option key={`${x.type}:${x.id}`} value={`${x.type}:${x.id}`}>{x.name}</option>)}</TSelect>
+            )}
+          </Field>
+        )}
         <AmountField label={t("amount", lang)} initialEntered={editing ? Math.abs(editing.displayAmount ?? editing.amount) : undefined} initialCurrency={editing?.displayCurrency || "USD"} onChange={setAmountMeta} rate={rate} lang={lang} />
-        {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} />}
+        {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} categories={TX_CATEGORIES} label={t("spendingCategory", lang)} />}
+        {type === "deposit" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} categories={DEPOSIT_CATEGORIES} label={t("incomeCategory", lang)} />}
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
         {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtExact(target.balance, target.nativeCurrency)}</div>}
         <div className="flex gap-2 mt-2">
-          <Button onClick={() => onSave({ id: editing?.id, targetId, targetType, type, amountMeta, note, txCategory: type === "withdraw" ? txCategory : null })} disabled={!targetId || !amountMeta.entered}>{t("save", lang)}</Button>
+          <Button onClick={() => onSave({
+            id: editing?.id, targetId, targetType, type, amountMeta, note,
+            txCategory: (type === "withdraw" || type === "deposit") ? txCategory : null,
+            toTargetId: isTransfer ? toTargetId : null, toTargetType: isTransfer ? toTargetType : null,
+          })} disabled={!targetId || !amountMeta.entered || (isTransfer && !toTargetId)}>{t("save", lang)}</Button>
           <Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button>
         </div>
       </div>
@@ -1545,28 +1597,50 @@ export default function WealthDashboard() {
     if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
     return d;
   };
-  const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory }) => {
+  const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory, toTargetId, toTargetType }) => {
     setData(d => {
       let next = d;
       if (id) {
         const old = d.activities.find(a => a.id === id);
-        if (old) next = applyTargetDelta(next, old.targetType, old.targetId, -old.targetDelta);
+        if (old) {
+          next = applyTargetDelta(next, old.targetType, old.targetId, -old.targetDelta);
+          if (old.secondaryTargetType) next = applyTargetDelta(next, old.secondaryTargetType, old.secondaryTargetId, -old.secondaryDelta);
+        }
       }
       const nativeCurrency = targetType === "defi"
         ? (next.defiPositions.find(p => p.id === targetId)?.nativeCurrency || "USD")
         : (next.baskets.find(b => b.id === targetId)?.nativeCurrency || "USD");
       const magnitude = amountInCurrency(amountMeta, nativeCurrency, rate);
-      const signedNative = type === "withdraw" ? -magnitude : magnitude;
-      next = applyTargetDelta(next, targetType, targetId, signedNative);
 
-      const signedUsd = type === "withdraw" ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
-      const signedDisplay = type === "withdraw" ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
-      const prevTotal = totalNetWorth(next, rate);
-      const pctOfTotal = prevTotal !== 0 ? (signedUsd / Math.abs(prevTotal)) * 100 : (signedUsd !== 0 ? 100 : 0);
+      let signedNative, secondaryTargetType = null, secondaryTargetId = null, secondaryDelta = null, pctOfTotal;
+      const signedUsd = (type === "withdraw" || type === "transfer") ? -Math.abs(amountMeta.usd) : Math.abs(amountMeta.usd);
+      const signedDisplay = (type === "withdraw" || type === "transfer") ? -Math.abs(amountMeta.entered) : Math.abs(amountMeta.entered);
+
+      if (type === "transfer" && toTargetId && toTargetType) {
+        signedNative = -magnitude; // leaves the source account
+        next = applyTargetDelta(next, targetType, targetId, signedNative);
+        const destCurrency = toTargetType === "defi"
+          ? (next.defiPositions.find(p => p.id === toTargetId)?.nativeCurrency || "USD")
+          : (next.baskets.find(b => b.id === toTargetId)?.nativeCurrency || "USD");
+        const destDelta = amountInCurrency(amountMeta, destCurrency, rate);
+        next = applyTargetDelta(next, toTargetType, toTargetId, destDelta);
+        secondaryTargetType = toTargetType; secondaryTargetId = toTargetId; secondaryDelta = destDelta;
+        // A transfer moves money within your own tracked wealth — it doesn't
+        // change your total net worth, so it isn't scored as a % impact.
+        pctOfTotal = 0;
+      } else {
+        signedNative = type === "withdraw" ? -magnitude : magnitude;
+        next = applyTargetDelta(next, targetType, targetId, signedNative);
+        const prevTotal = totalNetWorth(next, rate);
+        pctOfTotal = prevTotal !== 0 ? (signedUsd / Math.abs(prevTotal)) * 100 : (signedUsd !== 0 ? 100 : 0);
+      }
+
       const category = targetType === "defi" ? "defi" : next.baskets.find(b => b.id === targetId)?.category;
       const activity = {
         id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(),
-        type, targetId, targetType, targetDelta: signedNative, category, amount: signedUsd,
+        type, targetId, targetType, targetDelta: signedNative,
+        secondaryTargetType, secondaryTargetId, secondaryDelta,
+        category, amount: signedUsd,
         displayAmount: signedDisplay, displayCurrency: amountMeta.currency,
         note, txCategory, pctOfTotal,
       };
