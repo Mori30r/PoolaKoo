@@ -118,6 +118,8 @@ const STR = {
   monthly: { en: "Monthly", fa: "ماهانه" }, yearly: { en: "Yearly", fa: "سالانه" }, weekly: { en: "Weekly", fa: "هفتگی" },
   noData: { en: "Nothing here yet.", fa: "هنوز چیزی ثبت نشده." },
   balance: { en: "Balance", fa: "موجودی" }, apy: { en: "Interest Rate (APY %)", fa: "نرخ سود سالانه (%)" },
+  date: { en: "Date", fa: "تاریخ" },
+  insufficientFunds: { en: "Not enough balance in this account for that amount.", fa: "موجودی این حساب برای این مبلغ کافی نیست." },
   category: { en: "Category", fa: "دسته" }, name: { en: "Name", fa: "نام" }, amount: { en: "Amount", fa: "مبلغ" },
   save: { en: "Save", fa: "ذخیره" }, cancel: { en: "Cancel", fa: "انصراف" }, delete: { en: "Delete", fa: "حذف" }, edit: { en: "Edit", fa: "ویرایش" },
   deposit: { en: "Deposit", fa: "واریز" }, withdraw: { en: "Withdraw", fa: "برداشت" },
@@ -687,21 +689,31 @@ function BasketCard({ basket, lang, currency, rate, onEdit, onDelete, onQuickTx 
     </Card>
   );
 }
-function PortfolioView({ data, lang, currency, rate, openBasketModal, deleteBasket, openTxModal }) {
+function PortfolioView({ data, lang, currency, rate, openBasketModal, deleteBasket, openTxModal, openDefiModal, deleteDefi }) {
   const [filter, setFilter] = useState("all");
-  const baskets = filter === "all" ? data.baskets : data.baskets.filter(b => b.category === filter);
+  const showBaskets = filter !== "defi";
+  const showDefi = filter === "all" || filter === "defi";
+  const baskets = filter === "all" || filter === "defi" ? data.baskets : data.baskets.filter(b => b.category === filter);
+  const defiItems = showDefi ? data.defiPositions : [];
+  const visibleBaskets = showBaskets ? baskets : [];
+  const nothingToShow = visibleBaskets.length === 0 && defiItems.length === 0;
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <TSelect value={filter} onChange={e => setFilter(e.target.value)} style={{ width: "auto", minWidth: 180 }}>
           <option value="all">{t("allCategories", lang)}</option>
           {Object.keys(CATEGORY_META).map(cat => <option key={cat} value={cat}>{catLabel(cat, lang)}</option>)}
+          <option value="defi">{catLabel("defi", lang)}</option>
         </TSelect>
         <Button onClick={() => openBasketModal(null)}><Plus size={16} />{t("addBasket", lang)}</Button>
       </div>
-      {baskets.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyBaskets", lang)}</Card> : (
+      {nothingToShow ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyBaskets", lang)}</Card> : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {baskets.map(b => <BasketCard key={b.id} basket={b} lang={lang} currency={currency} rate={rate} onEdit={openBasketModal} onDelete={deleteBasket} onQuickTx={(basket, type) => openTxModal(basket, "basket", type)} />)}
+          {visibleBaskets.map(b => <BasketCard key={b.id} basket={b} lang={lang} currency={currency} rate={rate} onEdit={openBasketModal} onDelete={deleteBasket} onQuickTx={(basket, type) => openTxModal(basket, "basket", type)} />)}
+          {defiItems.map(p => (
+            <DefiPositionCard key={p.id} position={p} wallet={data.baskets.find(b => b.id === p.walletId)} lang={lang} currency={currency} rate={rate}
+              onEdit={openDefiModal} onDelete={deleteDefi} onQuickTx={(pos, type) => openTxModal(pos, "defi", type)} />
+          ))}
         </div>
       )}
     </div>
@@ -748,6 +760,23 @@ function WalletsView({ data, lang, currency, rate, openBasketModal, deleteBasket
 /* ============================================================================
    DEFI VIEW
    ============================================================================ */
+function DefiPositionCard({ position, wallet, lang, currency, rate, onEdit, onDelete, onQuickTx }) {
+  const monthlyNative = (Number(position.balance) || 0) * (Number(position.apy) || 0) / 100 / 12;
+  return (
+    <Card className="p-4 flex flex-col gap-3">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{position.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"} · {position.nativeCurrency || "USD"}</div></div></div>
+        <div className="flex gap-1"><button onClick={() => onEdit(position)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => onDelete(position.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
+      </div>
+      <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(position.balance, position.nativeCurrency, currency, rate)}</div>
+      <div className="text-xs" style={{ color: PALETTE.amber }}>{position.apy}% APY · {displayNative(monthlyNative, position.nativeCurrency, currency, rate)}/mo</div>
+      <div className="flex gap-2">
+        <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => onQuickTx(position, "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
+        <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => onQuickTx(position, "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
+      </div>
+    </Card>
+  );
+}
 function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openTxModal }) {
   const wallets = data.baskets.filter(b => b.category === "hotWallet" || b.category === "coldWallet");
   return (
@@ -756,24 +785,10 @@ function DefiView({ data, lang, currency, rate, openDefiModal, deleteDefi, openT
       {wallets.length === 0 && <Card className="p-4 text-xs" style={{ color: PALETTE.amber }}>{t("needsWalletFirst", lang)}</Card>}
       {data.defiPositions.length === 0 ? <Card className="p-10 text-center text-sm" style={{ color: PALETTE.inkDim }}>{t("emptyDefi", lang)}</Card> : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {data.defiPositions.map(p => {
-            const wallet = data.baskets.find(b => b.id === p.walletId);
-            const monthlyNative = (Number(p.balance) || 0) * (Number(p.apy) || 0) / 100 / 12;
-            return (
-              <Card key={p.id} className="p-4 flex flex-col gap-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3"><IconBadge Icon={DEFI_META.icon} color={DEFI_META.color} /><div><div className="text-sm font-semibold" style={{ color: PALETTE.ink }}>{p.name}</div><div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("connectedWallet", lang)}: {wallet?.name || "—"} · {p.nativeCurrency || "USD"}</div></div></div>
-                  <div className="flex gap-1"><button onClick={() => openDefiModal(p)} style={{ color: PALETTE.inkDim }}><Edit3 size={14} /></button><button onClick={confirmAnd(lang, () => deleteDefi(p.id))} style={{ color: PALETTE.coral }}><Trash2 size={14} /></button></div>
-                </div>
-                <div className="text-2xl font-semibold" style={{ color: PALETTE.ink }}>{displayNative(p.balance, p.nativeCurrency, currency, rate)}</div>
-                <div className="text-xs" style={{ color: PALETTE.amber }}>{p.apy}% APY · {displayNative(monthlyNative, p.nativeCurrency, currency, rate)}/mo</div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "deposit")}><Plus size={13} />{t("deposit", lang)}</Button>
-                  <Button variant="ghost" className="text-xs !py-1.5 flex-1" onClick={() => openTxModal(p, "defi", "withdraw")}><Minus size={13} />{t("withdraw", lang)}</Button>
-                </div>
-              </Card>
-            );
-          })}
+          {data.defiPositions.map(p => (
+            <DefiPositionCard key={p.id} position={p} wallet={data.baskets.find(b => b.id === p.walletId)} lang={lang} currency={currency} rate={rate}
+              onEdit={openDefiModal} onDelete={deleteDefi} onQuickTx={(pos, type) => openTxModal(pos, "defi", type)} />
+          ))}
         </div>
       )}
     </div>
@@ -1052,7 +1067,10 @@ function ActivityBreakdown({ data, lang, currency, rate }) {
   const [range, setRange] = useState("30d");
   const spans = { "7d": 7 * 864e5, "30d": 30 * 864e5, "365d": 365 * 864e5 };
   const cutoff = Date.now() - spans[range];
-  const inRange = data.activities.filter(a => new Date(a.date).getTime() >= cutoff);
+  // Transfers move money between your own accounts — they don't change
+  // your balance, so they're excluded from expense/income totals here
+  // (they still show up in the Activity list).
+  const inRange = data.activities.filter(a => new Date(a.date).getTime() >= cutoff && a.type !== "transfer");
   const expenses = inRange.filter(a => Number(a.amount) < 0);
   const income = inRange.filter(a => Number(a.amount) > 0);
   const groupBy = (arr) => {
@@ -1265,6 +1283,9 @@ function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
   const [amountMeta, setAmountMeta] = useState({ usd: loan.nativeCurrency === "IRT" ? suggested / (rate || 1) : suggested, entered: suggested, currency: loan.nativeCurrency || "USD" });
   const [basketId, setBasketId] = useState("");
   const [note, setNote] = useState("");
+  const basket = baskets.find(b => b.id === basketId);
+  const requiredMagnitude = basket ? amountInCurrency(amountMeta, basket.nativeCurrency || "USD", rate) : 0;
+  const insufficientFunds = basket && requiredMagnitude > (Number(basket.balance) || 0) + 1e-9;
   return (
     <Modal title={`${t("logPayment", lang)} · ${loan.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
@@ -1275,8 +1296,9 @@ function LoanPaymentModal({ loan, baskets, rate, onSave, onClose, lang }) {
             {baskets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </TSelect>
         </Field>
+        {insufficientFunds && <div className="text-xs" style={{ color: PALETTE.coral }}>{t("insufficientFunds", lang)}</div>}
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.entered}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.entered || insufficientFunds}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1309,6 +1331,11 @@ function DebtPaymentModal({ debt, baskets, rate, onSave, onClose, lang }) {
   const [basketId, setBasketId] = useState("");
   const [note, setNote] = useState("");
   const accountLabel = debt.type === "owed_to_me" ? t("payFromReceived", lang) : t("payFrom", lang);
+  const basket = baskets.find(b => b.id === basketId);
+  // Only paying someone off (i_owe) draws money OUT of an account — receiving
+  // a repayment (owed_to_me) adds to it, so there's nothing to check there.
+  const requiredMagnitude = basket && debt.type === "i_owe" ? amountInCurrency(amountMeta, basket.nativeCurrency || "USD", rate) : 0;
+  const insufficientFunds = basket && debt.type === "i_owe" && requiredMagnitude > (Number(basket.balance) || 0) + 1e-9;
   return (
     <Modal title={`${t("logPayment", lang)} · ${debt.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
@@ -1319,8 +1346,9 @@ function DebtPaymentModal({ debt, baskets, rate, onSave, onClose, lang }) {
             {baskets.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </TSelect>
         </Field>
+        {insufficientFunds && <div className="text-xs" style={{ color: PALETTE.coral }}>{t("insufficientFunds", lang)}</div>}
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
-        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.entered}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
+        <div className="flex gap-2 mt-2"><Button onClick={() => onSave({ amountMeta, basketId: basketId || null, note })} disabled={!amountMeta.entered || insufficientFunds}>{t("save", lang)}</Button><Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button></div>
       </div>
     </Modal>
   );
@@ -1369,6 +1397,11 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
     : { usd: 0, entered: 0, currency: "USD" });
   const [note, setNote] = useState(editing?.note || "");
   const [txCategory, setTxCategory] = useState(editing?.txCategory || null);
+  const [dateStr, setDateStr] = useState(() => {
+    const d = editing ? new Date(editing.date) : new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  });
   const [targetType, targetId] = targetKey ? targetKey.split(":") : [null, null];
   const target = targets.find(x => x.id === targetId);
 
@@ -1380,6 +1413,15 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
   const [toTargetType, toTargetId] = toTargetKey ? toTargetKey.split(":") : [null, null];
 
   const isTransfer = type === "transfer";
+  const needsFundsCheck = type === "withdraw" || isTransfer;
+
+  // If editing this exact activity, its own past effect is still baked into
+  // target.balance — add it back first so we're checking against what will
+  // actually be available once the old effect is reverted and reapplied.
+  const alreadyAppliedHere = editing && editing.targetId === targetId && editing.targetType === targetType ? (editing.targetDelta || 0) : 0;
+  const availableBalance = target ? (Number(target.balance) || 0) - alreadyAppliedHere : 0;
+  const requiredMagnitude = target && needsFundsCheck ? amountInCurrency(amountMeta, target.nativeCurrency || "USD", rate) : 0;
+  const insufficientFunds = needsFundsCheck && target && requiredMagnitude > availableBalance + 1e-9;
 
   return (
     <Modal title={editing ? t("editActivity", lang) : t("addTx", lang)} onClose={onClose}>
@@ -1404,8 +1446,10 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
           </Field>
         )}
         <AmountField label={t("amount", lang)} initialEntered={editing ? Math.abs(editing.displayAmount ?? editing.amount) : undefined} initialCurrency={editing?.displayCurrency || "USD"} onChange={setAmountMeta} rate={rate} lang={lang} />
+        {insufficientFunds && <div className="text-xs" style={{ color: PALETTE.coral }}>{t("insufficientFunds", lang)}</div>}
         {type === "withdraw" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} categories={TX_CATEGORIES} label={t("spendingCategory", lang)} />}
         {type === "deposit" && <CategoryPicker value={txCategory} onChange={setTxCategory} lang={lang} categories={DEPOSIT_CATEGORIES} label={t("incomeCategory", lang)} />}
+        <Field label={t("date", lang)}><TInput type="datetime-local" value={dateStr} onChange={e => setDateStr(e.target.value)} /></Field>
         <Field label={t("note", lang)}><TInput value={note} onChange={e => setNote(e.target.value)} /></Field>
         {target && <div className="text-[11px]" style={{ color: PALETTE.inkDim }}>{t("balance", lang)}: {fmtExact(target.balance, target.nativeCurrency)}</div>}
         <div className="flex gap-2 mt-2">
@@ -1413,7 +1457,8 @@ function TxModal({ data, initialTargetId, initialTargetType, initialType, editin
             id: editing?.id, targetId, targetType, type, amountMeta, note,
             txCategory: (type === "withdraw" || type === "deposit") ? txCategory : null,
             toTargetId: isTransfer ? toTargetId : null, toTargetType: isTransfer ? toTargetType : null,
-          })} disabled={!targetId || !amountMeta.entered || (isTransfer && !toTargetId)}>{t("save", lang)}</Button>
+            date: dateStr ? new Date(dateStr).toISOString() : nowISO(),
+          })} disabled={!targetId || !amountMeta.entered || (isTransfer && !toTargetId) || insufficientFunds}>{t("save", lang)}</Button>
           <Button variant="ghost" onClick={onClose}>{t("cancel", lang)}</Button>
         </div>
       </div>
@@ -1597,7 +1642,7 @@ export default function WealthDashboard() {
     if (targetType === "defi") return { ...d, defiPositions: d.defiPositions.map(p => p.id === targetId ? { ...p, balance: (Number(p.balance) || 0) + delta } : p) };
     return d;
   };
-  const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory, toTargetId, toTargetType }) => {
+  const saveTx = ({ id, targetId, targetType, type, amountMeta, note, txCategory, toTargetId, toTargetType, date }) => {
     setData(d => {
       let next = d;
       if (id) {
@@ -1637,7 +1682,7 @@ export default function WealthDashboard() {
 
       const category = targetType === "defi" ? "defi" : next.baskets.find(b => b.id === targetId)?.category;
       const activity = {
-        id: id || uid(), date: id ? (d.activities.find(a => a.id === id)?.date || nowISO()) : nowISO(),
+        id: id || uid(), date: date || nowISO(),
         type, targetId, targetType, targetDelta: signedNative,
         secondaryTargetType, secondaryTargetId, secondaryDelta,
         category, amount: signedUsd,
@@ -1703,7 +1748,9 @@ export default function WealthDashboard() {
             <PortfolioView data={data} lang={lang} currency={currency} rate={rate}
               openBasketModal={(b, defCat) => setModal({ kind: "basket", payload: b, defaultCategory: defCat })}
               deleteBasket={deleteBasket}
-              openTxModal={(basket, targetType, type) => setModal({ kind: "tx", payload: { targetId: basket.id, targetType, type } })} />
+              openTxModal={(basket, targetType, type) => setModal({ kind: "tx", payload: { targetId: basket.id, targetType, type } })}
+              openDefiModal={(p) => setModal({ kind: "defi", payload: p })}
+              deleteDefi={deleteDefi} />
           )}
           {view === "wallets" && (
             <WalletsView data={data} lang={lang} currency={currency} rate={rate}
